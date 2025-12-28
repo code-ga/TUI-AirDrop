@@ -34,8 +34,10 @@ export class NetworkManager extends EventEmitter {
   private UDP_PORT = 8888;
   private CONTROL_PORT = 8889;
 
-  constructor() {
+  constructor(udpPort = 8888, controlPort = 8889) {
     super();
+    this.UDP_PORT = udpPort;
+    this.CONTROL_PORT = controlPort;
     this.setupUdp();
     this.setupControlServer();
   }
@@ -90,19 +92,28 @@ export class NetworkManager extends EventEmitter {
     if (this.cleanupInterval) clearInterval(this.cleanupInterval);
   }
 
-  public close() {
+  public async close(): Promise<void> {
     this.stopDiscovery();
     this.udpSocket.close();
-    this.controlServer.close();
+    return new Promise((resolve) => {
+      this.controlServer.close(() => resolve());
+    });
   }
 
   private broadcastHeartbeat() {
-    const payload = JSON.stringify({
-      displayName: this.displayName,
-      ip: this.localIps[0] || "127.0.0.1", // Broadcast our primary IP
-      offering: this.offering,
-    });
-    this.udpSocket.send(payload, this.UDP_PORT, "255.255.255.255");
+    this.localIps = NetworkManager.getLocalIps(); // Refresh periodically
+    
+    for (const ip of this.localIps) {
+      const payload = JSON.stringify({
+        displayName: this.displayName,
+        ip: ip,
+        offering: this.offering,
+      });
+
+      // We send to 255.255.255.255, but the recipient will see the different IPs 
+      // in the payload and know which one to use.
+      this.udpSocket.send(payload, this.UDP_PORT, "255.255.255.255");
+    }
   }
 
   private cleanupPeers() {

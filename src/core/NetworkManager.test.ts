@@ -12,8 +12,8 @@ describe("NetworkManager", () => {
     }
   });
 
-  test("generateToken and verifyToken should work", () => {
-    const nm = new NetworkManager();
+  test("generateToken and verifyToken should work", async () => {
+    const nm = new NetworkManager(9001, 10001);
     const filePath = "/path/to/file.txt";
     const ip = "192.168.1.100";
     
@@ -24,11 +24,11 @@ describe("NetworkManager", () => {
     expect(verifiedPath).toBe(filePath);
     
     expect(nm.verifyToken(token, ip)).toBeNull();
-    nm.close();
+    await nm.close();
   });
 
   test("UDP Discovery Loop (Listener)", async () => {
-    const nm = new NetworkManager();
+    const nm = new NetworkManager(9002, 10002);
     nm.startDiscovery();
     
     const promise = new Promise<void>((resolve) => {
@@ -40,23 +40,26 @@ describe("NetworkManager", () => {
     });
 
     const mockUdp = createSocket("udp4");
-    const payload = JSON.stringify({
-      displayName: "TestPeer",
-      ip: "1.2.3.4",
-      offering: { filename: "test.txt", size: 123 }
-    });
     
-    // Wait a bit for the socket to bind
+    // Test with multiple payloads (simulating multi-NIC)
+    const payloads = [
+      JSON.stringify({ displayName: "TestPeer", ip: "1.2.3.4", offering: { filename: "test1.txt", size: 123 } }),
+      JSON.stringify({ displayName: "TestPeer", ip: "1.2.3.5", offering: { filename: "test1.txt", size: 123 } })
+    ];
+    
     await new Promise(r => setTimeout(r, 100));
-    mockUdp.send(payload, 8888, "127.0.0.1");
+    const p1 = payloads[0];
+    const p2 = payloads[1];
+    if (p1) mockUdp.send(p1, 9002, "127.0.0.1");
+    if (p2) mockUdp.send(p2, 9002, "127.0.0.1");
     
     await promise;
     mockUdp.close();
-    nm.close();
+    await nm.close();
   });
 
   test("TCP Handshake (Auto-Approve)", async () => {
-    const nm = new NetworkManager();
+    const nm = new NetworkManager(9003, 10003);
     nm.sharingMode = "auto";
     nm.offering = { filename: "shared.txt", size: 1000 };
     
@@ -66,11 +69,11 @@ describe("NetworkManager", () => {
     
     const filePath = nm.verifyToken(token!, "127.0.0.1");
     expect(filePath).toBe("shared.txt");
-    nm.close();
+    await nm.close();
   });
 
   test("TCP Handshake (Manual Approval)", async () => {
-    const nm = new NetworkManager();
+    const nm = new NetworkManager(9004, 10004);
     nm.sharingMode = "manual";
     nm.offering = { filename: "shared.txt", size: 1000 };
     
@@ -82,6 +85,6 @@ describe("NetworkManager", () => {
 
     const token = await requestPromise;
     expect(token).not.toBeNull();
-    nm.close();
+    await nm.close();
   });
 });
