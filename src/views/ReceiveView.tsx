@@ -3,16 +3,16 @@ import { Text, Box } from "ink";
 import { BaseView } from "../core/BaseView";
 import CustomSelectInput from "../components/CustomSelectInput";
 
-import type { Peer } from "../core/NetworkManager";
+import type { Peer, FileRequest } from "../core/NetworkManager";
 
 interface ReceiveViewProps {
   sharingApprovalMode: "auto" | "manual";
   offeredFile: string | null;
   peers: Peer[];
-  pendingDownloadRequests: any[];
+  pendingDownloadRequests: FileRequest[];
   currentShare: { from: string; file: string; size: string | number } | null;
   onShareAction: (action: "accept" | "decline", share: any) => void;
-  onDownloadApproval: (request: any) => void;
+  onDownloadApproval: (request: FileRequest) => void;
   onBack: () => void;
 }
 

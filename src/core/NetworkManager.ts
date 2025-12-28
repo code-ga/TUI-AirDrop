@@ -12,9 +12,15 @@ export interface Peer {
   lastSeen: number;
 }
 
+export interface FileRequest {
+  fromIp: string;
+  fileName: string;
+  approve: (approved: boolean) => void;
+}
+
 export interface NetworkManagerEvents {
   peerUpdate: (peers: Peer[]) => void;
-  fileRequest: (req: { fromIp: string; fileName: string; approve: (approved: boolean) => void }) => void;
+  fileRequest: (req: FileRequest) => void;
   transferReady: (info: { token: string; ip: string; filePath: string }) => void;
 }
 

@@ -1,4 +1,3 @@
-import React from "react";
 import { Text, Box } from "ink";
 import { MenuView } from "../core/MenuView";
 import type { MenuItem } from "../core/MenuView";

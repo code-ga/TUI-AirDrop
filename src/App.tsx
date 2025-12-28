@@ -9,7 +9,7 @@ import SettingsView from "./views/SettingsView";
 import SaveLocationView from "./views/SaveLocationView";
 import { NavigationProvider, useNavigator } from "./core/Navigation";
 import { NetworkManager } from "./core/NetworkManager";
-import type { Peer } from "./core/NetworkManager";
+import type { Peer, FileRequest } from "./core/NetworkManager";
 
 const networkManager = new NetworkManager();
 
@@ -19,7 +19,7 @@ const AppContent = () => {
   const [sharingApprovalMode, setSharingApprovalMode] = useState<"auto" | "manual">("manual");
   const [offeredFile, setOfferedFile] = useState<string | null>(null);
   const [peers, setPeers] = useState<Peer[]>([]);
-  const [pendingDownloadRequests, setPendingDownloadRequests] = useState<any[]>([]);
+  const [pendingDownloadRequests, setPendingDownloadRequests] = useState<FileRequest[]>([]);
   const [currentShare, setCurrentShare] = useState<{
     from: string;
     file: string;
@@ -34,12 +34,24 @@ const AppContent = () => {
   useEffect(() => {
     networkManager.startDiscovery();
     
-    networkManager.on("peerUpdate", (updatedPeers) => {
-      setPeers(updatedPeers);
+    networkManager.on("peerUpdate", (updatedPeers: Peer[]) => {
+      // if peer is already in the list, update it, else add it
+      setPeers(prev => {
+        const updated = [...prev];
+        updatedPeers.forEach(peer => {
+          const index = updated.findIndex(p => p.ip === peer.ip);
+          if (index !== -1) {
+            updated[index] = peer;
+          } else {
+            updated.push(peer);
+          }
+        });
+        return updated;
+      });
     });
 
-    networkManager.on("fileRequest", ({ fromIp, fileName, approve }) => {
-      setPendingDownloadRequests((prev) => [...prev, { fromIp, fileName, approve }]);
+    networkManager.on("fileRequest", (req: FileRequest) => {
+      setPendingDownloadRequests((prev) => [...prev, req]);
     });
 
     return () => networkManager.stopDiscovery();
