@@ -2,7 +2,8 @@
   "name": "tui-airdrop",
   "module": "index.ts",
   "type": "module",
-  "private": true,
+  "private": false,
+  "version": "0.3.0",
   "bin": "./dist/AirDrop",
   "scripts": {
     "start": "bun run index.tsx",
