@@ -22,7 +22,7 @@ describe("NetworkManager", () => {
     
     const verifiedPath = nm.verifyToken(token, ip);
     expect(verifiedPath).toBe(filePath);
-    
+      
     expect(nm.verifyToken(token, ip)).toBeNull();
     await nm.close();
   });
@@ -67,7 +67,7 @@ describe("NetworkManager", () => {
     expect(token).not.toBeNull();
     expect(token).toHaveLength(32);
     
-    const filePath = nm.verifyToken(token!, "127.0.0.1");
+    const filePath = nm.verifyToken(token?.token!, "127.0.0.1");
     expect(filePath).toBe("shared.txt");
     await nm.close();
   });

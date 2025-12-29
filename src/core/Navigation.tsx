@@ -36,6 +36,7 @@ export const NavigationProvider: React.FC<{ children: ReactNode }> = ({ children
       if (prev.history.length <= 1) return prev;
       const newHistory = prev.history.slice(0, -1);
       const nextView = newHistory[newHistory.length - 1];
+      if (!nextView) return prev;
       return {
         ...prev,
         currentView: nextView,
