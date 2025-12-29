@@ -33,23 +33,25 @@ export class ReceiveView extends BaseView<ReceiveViewProps> {
       .filter((p) => p.offering)
       .flatMap((peer, index) => [
         {
+          key: `accept-${peer.ip}-${index}`,
           label: `[Get] ${peer.offering!.filename} from ${peer.displayName}`,
-          value: { type: "incoming", action: "accept", data: { peer, file: peer.offering }, key: `accept-${index}` },
+          value: { type: "incoming", action: "accept", data: { peer, file: peer.offering } },
         },
       ]) as any[])
       .concat(
         pendingDownloadRequests.map((req, index) => ({
+          key: `req-${req.fromIp}-${index}`,
           label: `[Approve] ${req.fromIp} wanting ${req.fileName}`,
-          value: { type: "outgoing", action: "approve", request: req, key: `req-${index}` },
+          value: { type: "outgoing", action: "approve", request: req },
         }))
       )
       .concat([
         {
+          key: "back",
           label: "Back to Menu",
           value: {
             type: "system",
             action: "back",
-            key: "back",
           },
         },
       ]);

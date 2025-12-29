@@ -25,6 +25,7 @@ export const NavigationProvider: React.FC<{ children: ReactNode }> = ({ children
 
   const push = (view: ViewName) => {
     setState((prev) => ({
+      ...prev,
       currentView: view,
       history: [...prev.history, view],
     }));
@@ -36,6 +37,7 @@ export const NavigationProvider: React.FC<{ children: ReactNode }> = ({ children
       const newHistory = prev.history.slice(0, -1);
       const nextView = newHistory[newHistory.length - 1];
       return {
+        ...prev,
         currentView: nextView,
         history: newHistory,
       };
@@ -43,7 +45,7 @@ export const NavigationProvider: React.FC<{ children: ReactNode }> = ({ children
   };
 
   const reset = () => {
-    setState({ currentView: "menu", history: ["menu"] });
+    setState(prev => ({ ...prev, currentView: "menu", history: ["menu"] }));
   };
 
   return (

@@ -1,6 +1,6 @@
-# TUI-AirDrop 🚀
+# Bean-CLI 🚀
 
-A powerful, secure, and beautiful Terminal User Interface (TUI) file-sharing application designed for local networks. Think of it as AirDrop, but for your terminal.
+Bean-CLI is a powerful, secure, and beautiful Terminal User Interface (TUI) file-sharing application designed for local networks. Think of it as AirDrop, but for your terminal.
 
 ![Version](https://img.shields.io/badge/version-0.3.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
@@ -34,8 +34,8 @@ A powerful, secure, and beautiful Terminal User Interface (TUI) file-sharing app
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/TUI-AirDrop.git
-   cd TUI-AirDrop
+   git clone https://github.com/code-ga/TUI-AirDrop Bean-CLI
+   cd Bean-CLI
    ```
 
 2. Install dependencies:
@@ -80,4 +80,4 @@ bun run index.tsx
 
 ## 📄 License
 
-MIT © 2025 TUI-AirDrop Team
+MIT © 2025 Bean-CLI Team

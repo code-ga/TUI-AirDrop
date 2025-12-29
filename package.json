@@ -3,17 +3,23 @@
   "module": "index.ts",
   "type": "module",
   "private": true,
+  "bin": "./dist/AirDrop",
+  "scripts": {
+    "start": "bun run index.tsx",
+    "build": "bun build --compile --outfile=./dist/AirDrop ./index.tsx"
+  },
   "devDependencies": {
     "@types/bun": "latest",
     "@types/react": "^19.2.7",
     "react-devtools-core": "^7.0.1"
   },
   "peerDependencies": {
-    "typescript": "^5"
+    "typescript": "^5.9.3"
   },
   "dependencies": {
     "ink": "^6.6.0",
     "ink-select-input": "^6.2.0",
+    "ink-text-input": "^6.0.0",
     "react": "^19.2.3"
   }
 }

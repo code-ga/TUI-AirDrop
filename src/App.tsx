@@ -9,7 +9,10 @@ import SettingsView from "./views/SettingsView";
 import SaveLocationView from "./views/SaveLocationView";
 import { NavigationProvider, useNavigator } from "./core/Navigation";
 import { NetworkManager } from "./core/NetworkManager";
-import type { Peer, FileRequest } from "./core/NetworkManager";
+import type { Peer, FileRequest, TransferReadyInfo } from "./core/NetworkManager";
+import type { TransferInfo } from "./core/TransferManager";
+import TransferProgressView from "./components/TransferProgressView";
+import SavePathPrompt from "./components/SavePathPrompt";
 
 const networkManager = new NetworkManager();
 
@@ -20,6 +23,8 @@ const AppContent = () => {
   const [offeredFile, setOfferedFile] = useState<string | null>(null);
   const [peers, setPeers] = useState<Peer[]>([]);
   const [pendingDownloadRequests, setPendingDownloadRequests] = useState<FileRequest[]>([]);
+  const [pendingTransfer, setPendingTransfer] = useState<TransferReadyInfo | null>(null);
+  const [activeTransfers, setActiveTransfers] = useState<TransferInfo[]>([]);
   const [currentShare, setCurrentShare] = useState<{
     from: string;
     file: string;
@@ -54,6 +59,39 @@ const AppContent = () => {
       setPendingDownloadRequests((prev) => [...prev, req]);
     });
 
+    networkManager.on("transferProgress", (info: TransferInfo) => {
+      setActiveTransfers((prev) => {
+        const index = prev.findIndex((t) => t.filename === info.filename);
+        if (index !== -1) {
+          const updated = [...prev];
+          updated[index] = info;
+          return updated;
+        }
+        return [...prev, info];
+      });
+    });
+
+    networkManager.on("transferComplete", (info) => {
+      setActiveTransfers((prev) => prev.filter((t) => t.filename !== info.filename));
+      // Show completion notification
+    });
+
+    networkManager.on("transferError", (info) => {
+      setActiveTransfers((prev) => {
+        const index = prev.findIndex((t) => t.filename === info.filename);
+        if (index !== -1) {
+          const updated = [...prev];
+          if (updated[index]) updated[index] = { 
+            ...updated[index], 
+            status: "error" as const, 
+            error: info.error 
+          };
+          return updated;
+        }
+        return prev;
+      });
+    });
+
     return () => networkManager.stopDiscovery();
   }, []);
 
@@ -62,7 +100,7 @@ const AppContent = () => {
   }, [sharingApprovalMode]);
 
   useEffect(() => {
-    networkManager.offering = offeredFile ? { filename: offeredFile.split(/[/\\]/).pop() || offeredFile, size: 0 } : null;
+    networkManager.offering = offeredFile ? { filename: offeredFile.split(/[/\\]/).pop() || offeredFile, size: 0, filePath: offeredFile } : null;
   }, [offeredFile]);
 
   useInput((input, key) => {
@@ -74,10 +112,10 @@ const AppContent = () => {
   const handleShareAction = async (action: "accept" | "decline", data: any) => {
     if (action === "accept") {
       const { peer, file } = data;
-      const token = await networkManager.requestFile(peer.ip, file.filename);
-      if (token) {
-        setCurrentShare({ from: peer.displayName, file: file.filename, size: file.size });
-        push("save-share");
+      const transferInfo = await networkManager.requestFile(peer.ip, file.filename);
+      if (transferInfo) {
+        setPendingTransfer(transferInfo);
+        setCurrentShare({ from: peer.displayName, file: file.filename, size: transferInfo.size });
       } else {
         // Handle rejection or error
       }
@@ -86,12 +124,36 @@ const AppContent = () => {
     }
   };
 
-  const handleSaveDir = (dir: string) => {
-    if (currentShare) {
-      console.log(`Saving ${currentShare.file} from ${currentShare.from} to ${dir}`);
-      setCurrentShare(null);
-      push("receive");
+  const handleSaveDir = async (dir: string) => {
+    if (currentShare && pendingTransfer) {
+      const savePath = `${dir}/${pendingTransfer.filename}`;
+      try {
+        // Start the download
+        await networkManager.downloadFile(pendingTransfer, savePath);
+        setCurrentShare(null);
+        setPendingTransfer(null);
+        reset();
+      } catch (error) {
+        console.error("Download error:", error);
+      }
     }
+  };
+
+  const handleSavePathConfirm = async (path: string) => {
+    if (pendingTransfer) {
+      try {
+        await networkManager.downloadFile(pendingTransfer, path);
+        setPendingTransfer(null);
+        setCurrentShare(null);
+      } catch (error) {
+        console.error("Download error:", error);
+      }
+    }
+  };
+
+  const handleSavePathCancel = () => {
+    setPendingTransfer(null);
+    setCurrentShare(null);
   };
 
   const handleSelect = (item: any) => {
@@ -155,6 +217,38 @@ const AppContent = () => {
         width="50%"
         borderStyle="single"
         borderColor="blue">
+        
+        {/* Save Path Prompt */}
+        {pendingTransfer && (
+          <SavePathPrompt
+            filename={pendingTransfer.filename}
+            size={pendingTransfer.size}
+            defaultPath={`./Downloads/${pendingTransfer.filename}`}
+            onConfirm={handleSavePathConfirm}
+            onCancel={handleSavePathCancel}
+          />
+        )}
+
+        {/* Active Transfers */}
+        {activeTransfers.length > 0 && (
+          <Box flexDirection="column" marginTop={1}>
+            <Text bold underline>Active Transfers</Text>
+            {activeTransfers.map((transfer) => (
+              <Box key={transfer.filename} marginTop={1}>
+                <TransferProgressView
+                  filename={transfer.filename}
+                  progress={transfer.progress}
+                  size={transfer.size}
+                  speed={transfer.speed}
+                  status={transfer.status}
+                  error={transfer.error}
+                />
+              </Box>
+            ))}
+          </Box>
+        )}
+
+        {/* Receive View */}
         <ReceiveView
           sharingApprovalMode={sharingApprovalMode}
           offeredFile={offeredFile}

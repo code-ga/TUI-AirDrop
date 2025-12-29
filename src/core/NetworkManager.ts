@@ -3,25 +3,42 @@ import { createSocket } from "node:dgram";
 import type { RemoteInfo } from "node:dgram";
 import { randomBytes } from "node:crypto";
 import { hostname, networkInterfaces } from "node:os";
+import { stat } from "node:fs/promises";
 import EventEmitter from "node:events";
+import { TransferManager } from "./TransferManager";
+import type { TransferInfo } from "./TransferManager";
 
 export interface Peer {
   displayName: string;
   ip: string;
-  offering: { filename: string; size: number } | null;
+  offering: { filename: string; size: number; filePath?: string } | null;
   lastSeen: number;
 }
 
 export interface FileRequest {
   fromIp: string;
   fileName: string;
+  filePath: string;
   approve: (approved: boolean) => void;
+}
+
+export interface TransferReadyInfo {
+  approved: true;
+  token: string;
+  host: string;
+  port: number;
+  filename: string;
+  size: number;
+  filePath: string;
 }
 
 export interface NetworkManagerEvents {
   peerUpdate: (peers: Peer[]) => void;
   fileRequest: (req: FileRequest) => void;
-  transferReady: (info: { token: string; ip: string; filePath: string }) => void;
+  transferReady: (info: TransferReadyInfo) => void;
+  transferProgress: (info: TransferInfo) => void;
+  transferComplete: (info: { filename: string; savePath: string }) => void;
+  transferError: (info: { filename: string; error: string }) => void;
 }
 
 export class NetworkManager extends EventEmitter {
@@ -31,19 +48,32 @@ export class NetworkManager extends EventEmitter {
   private cleanupInterval?: Timer;
   private controlServer = createServer();
   private tokens = new Map<string, { filePath: string; ip: string }>();
+  private transferManager: TransferManager;
 
   public displayName: string = hostname();
   public localIps: string[] = [];
-  public offering: { filename: string; size: number } | null = null;
+  public offering: { filename: string; size: number; filePath?: string } | null = null;
   public sharingMode: "auto" | "manual" = "manual";
 
   private UDP_PORT = 8888;
   private CONTROL_PORT = 8889;
+  private TRANSFER_PORT = 5556;
 
-  constructor(udpPort = 8888, controlPort = 8889) {
+  constructor(udpPort = 8888, controlPort = 8889, transferPort = 5556) {
     super();
     this.UDP_PORT = udpPort;
     this.CONTROL_PORT = controlPort;
+    this.TRANSFER_PORT = transferPort;
+    
+    // Initialize TransferManager
+    this.transferManager = new TransferManager(transferPort);
+    this.transferManager.setTokenValidator((token, ip) => this.verifyToken(token, ip));
+    
+    // Forward transfer events
+    this.transferManager.on("transferProgress", (info) => this.emit("transferProgress", info));
+    this.transferManager.on("transferComplete", (info) => this.emit("transferComplete", info));
+    this.transferManager.on("transferError", (info) => this.emit("transferError", info));
+    
     this.setupUdp();
     this.setupControlServer();
   }
@@ -101,6 +131,7 @@ export class NetworkManager extends EventEmitter {
   public async close(): Promise<void> {
     this.stopDiscovery();
     this.udpSocket.close();
+    await this.transferManager.close();
     return new Promise((resolve) => {
       this.controlServer.close(() => resolve());
     });
@@ -116,7 +147,7 @@ export class NetworkManager extends EventEmitter {
         offering: this.offering,
       });
 
-      // We send to 255.255.255.255, but the recipient will see the different IPs 
+      // We send to 255.255.255.255, but the recipient will see the different IPs
       // in the payload and know which one to use.
       this.udpSocket.send(payload, this.UDP_PORT, "255.255.255.255");
     }
@@ -140,13 +171,14 @@ export class NetworkManager extends EventEmitter {
     this.controlServer.on("connection", (socket) => {
       const fromIp = socket.remoteAddress?.replace(/^.*:/, "") || "";
       
-      socket.once("data", (data) => {
+      socket.once("data", async (data) => {
         try {
           const req = JSON.parse(data.toString());
           if (req.type === "request_file") {
-            this.handleFileRequest(socket, fromIp, req.fileName);
+            await this.handleFileRequest(socket, fromIp, req.fileName);
           }
         } catch (e) {
+          console.error(`Error handling request from ${fromIp}: ${e}`);
           socket.destroy();
         }
       });
@@ -155,21 +187,49 @@ export class NetworkManager extends EventEmitter {
     this.controlServer.listen(this.CONTROL_PORT);
   }
 
-  private handleFileRequest(socket: Socket, fromIp: string, fileName: string) {
-    const approve = (approved: boolean) => {
-      if (approved && this.offering && this.offering.filename === fileName) {
-        const token = this.generateToken(fileName, fromIp); // Assume offering match
-        socket.write(JSON.stringify({ approved: true, token }));
+  private async handleFileRequest(socket: Socket, fromIp: string, fileName: string) {
+    const approve = async (approved: boolean) => {
+      if (approved && this.offering && this.offering.filename === fileName && this.offering.filePath) {
+        try {
+          // Get file stats
+          const stats = await stat(this.offering.filePath);
+          const fileSize = stats.size;
+          
+          // Generate token
+          const token = this.generateToken(this.offering.filePath, fromIp);
+          
+          // Send comprehensive response
+          const response: TransferReadyInfo = {
+            approved: true,
+            token,
+            host: this.localIps[0] || "127.0.0.1",
+            port: this.TRANSFER_PORT,
+            filename: fileName,
+            size: fileSize,
+            filePath: this.offering.filePath,
+          };
+          
+          socket.write(JSON.stringify(response));
+        } catch (error) {
+          socket.write(JSON.stringify({ approved: false, reason: "File not found" }));
+        }
       } else {
-        socket.write(JSON.stringify({ approved: false }));
+        socket.write(JSON.stringify({ approved: false, reason: approved ? "File not shared" : "Denied by host" }));
       }
       socket.end();
     };
 
+    // Validate file exists and matches offering
+    if (!this.offering || this.offering.filename !== fileName) {
+      socket.write(JSON.stringify({ approved: false, reason: "File not available" }));
+      socket.end();
+      return;
+    }
+
     if (this.sharingMode === "auto") {
-      approve(true);
+      await approve(true);
     } else {
-      this.emit("fileRequest", { fromIp, fileName, approve });
+      this.emit("fileRequest", { fromIp, fileName, filePath: this.offering.filePath || "", approve });
     }
   }
 
@@ -195,7 +255,7 @@ export class NetworkManager extends EventEmitter {
     return null;
   }
 
-  public async requestFile(peerIp: string, fileName: string): Promise<string | null> {
+  public async requestFile(peerIp: string, fileName: string): Promise<TransferReadyInfo | null> {
     return new Promise((resolve) => {
       const socket = new Socket();
       socket.connect(this.CONTROL_PORT, peerIp, () => {
@@ -205,7 +265,12 @@ export class NetworkManager extends EventEmitter {
       socket.on("data", (data) => {
         try {
           const res = JSON.parse(data.toString());
-          resolve(res.approved ? res.token : null);
+          if (res.approved && res.filename === fileName) {
+            // Validate response has all required fields
+            resolve(res as TransferReadyInfo);
+          } else {
+            resolve(null);
+          }
         } catch (e) {
           resolve(null);
         }
@@ -216,5 +281,28 @@ export class NetworkManager extends EventEmitter {
         resolve(null);
       });
     });
+  }
+
+  /**
+   * Start receiving a file (client side)
+   */
+  public async downloadFile(
+    transferInfo: TransferReadyInfo,
+    savePath: string
+  ): Promise<void> {
+    return this.transferManager.receiveFile(
+      transferInfo.host,
+      transferInfo.token,
+      savePath,
+      transferInfo.filename,
+      transferInfo.size
+    );
+  }
+
+  /**
+   * Get active transfers
+   */
+  public getActiveTransfers(): TransferInfo[] {
+    return this.transferManager.getActiveTransfers();
   }
 }
