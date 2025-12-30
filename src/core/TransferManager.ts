@@ -4,13 +4,17 @@ import { open, stat, rename, unlink, mkdir } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
 import EventEmitter from "node:events";
 import { existsSync, statSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
+import { scanDirectory } from "./FileSystemUtils";
 
 export interface PacketHeader {
+  type: "DATA" | "FILE_START" | "BATCH_END";
   seq: number;
-  size: number;
-  hash: string;
-  isLast: boolean;
+  size: number; // Payload size for this packet
+  hash?: string;
+  isLast?: boolean;
+  path?: string; // For FILE_START
+  fileSize?: number; // Total file size, used in FILE_START
 }
 
 export interface TransferInfo {
@@ -21,6 +25,9 @@ export interface TransferInfo {
   status: "pending" | "active" | "paused" | "complete" | "error";
   error?: string;
   savePath?: string;
+  isBatch?: boolean;
+  currentFileIndex?: number;
+  totalFiles?: number;
 }
 
 export interface TransferManagerEvents {
@@ -76,15 +83,69 @@ export class TransferManager extends EventEmitter {
   }
 
   /**
-   * Host: Send file to client
+   * Host: Send file or folder to client
    */
   private async handleSend(socket: Socket, filePath: string, startSeq: number) {
-    let fileHandle: FileHandle | null = null;
+    try {
+      const stats = await stat(filePath);
+      
+      if (stats.isDirectory()) {
+         await this.sendBatch(socket, filePath);
+      } else {
+         await this.sendFileStream(socket, filePath, startSeq);
+      }
+    } catch (error) {
+      socket.destroy();
+      console.error("Send error:", error);
+    }
+  }
 
+  private async sendBatch(socket: Socket, rootPath: string) {
+    try {
+      const files = await scanDirectory(rootPath);
+      
+      for (const file of files) {
+         // 1. Send FILE_START
+         const startHeader: PacketHeader = {
+            type: "FILE_START",
+            seq: 0,
+            size: 0, // No payload in control packet
+            fileSize: file.size,
+            path: file.relativePath
+         };
+         
+         const startPacket = this.serializePacket(startHeader, Buffer.alloc(0));
+         if (!socket.write(startPacket)) {
+            await new Promise((resolve) => socket.once("drain", resolve));
+         }
+
+         // 2. Send File Data
+         await this.sendFileStream(socket, file.absolutePath, 0, false);
+      }
+
+      // 3. Send BATCH_END
+      const endHeader: PacketHeader = {
+         type: "BATCH_END",
+         seq: 0,
+         size: 0
+      };
+      const endPacket = this.serializePacket(endHeader, Buffer.alloc(0));
+      socket.write(endPacket);
+      
+      socket.end();
+
+    } catch (error) {
+       console.error("Batch send error", error);
+       socket.destroy();
+    }
+  }
+
+  private async sendFileStream(socket: Socket, filePath: string, startSeq: number, closeSocketAtEnd: boolean = true) {
+    let fileHandle: FileHandle | null = null;
+    
     try {
       const stats = await stat(filePath);
       const fileSize = stats.size;
-      const filename = filePath.split(/[/\\]/).pop() || filePath;
 
       fileHandle = await open(filePath, "r");
       const byteOffset = startSeq * this.CHUNK_SIZE;
@@ -107,6 +168,7 @@ export class TransferManager extends EventEmitter {
         const hash = createHash("sha256").update(chunk).digest("hex");
 
         const header: PacketHeader = {
+          type: "DATA",
           seq: currentSeq,
           size: chunkSize,
           hash,
@@ -115,7 +177,6 @@ export class TransferManager extends EventEmitter {
 
         const packet = this.serializePacket(header, chunk);
 
-        // Wait for drain if needed (backpressure)
         if (!socket.write(packet)) {
           await new Promise((resolve) => socket.once("drain", resolve));
         }
@@ -125,79 +186,87 @@ export class TransferManager extends EventEmitter {
       }
 
       await fileHandle.close();
-      socket.end();
+      if (closeSocketAtEnd) {
+         socket.end();
+      }
     } catch (error) {
       if (fileHandle) await fileHandle.close();
-      socket.destroy();
-      console.error("Send error:", error);
+      if (closeSocketAtEnd) socket.destroy();
+      throw error;
     }
   }
 
   /**
-   * Client: Receive file from host
+   * Client: Receive file or batch from host
    */
   public async receiveFile(
     host: string,
     token: string,
     savePath: string,
-    filename: string,
-    totalSize: number
+    filename: string, // root name for batch
+    totalSize: number, // total batch size or file size
+    isBatch: boolean = false
   ): Promise<void> {
-    // Ensure directory exists
-    const dir = dirname(savePath);
-    if (!existsSync(dir)) {
-      await mkdir(dir, { recursive: true });
+    
+    // Prepare root directory if batch
+    if (isBatch) {
+      if (!existsSync(savePath)) {
+        await mkdir(savePath, { recursive: true });
+      }
+    } else {
+        const dir = dirname(savePath);
+        if (!existsSync(dir)) {
+          await mkdir(dir, { recursive: true });
+        }
     }
 
     return new Promise((resolve, reject) => {
       const socket = new Socket();
-      const partPath = `${savePath}.part`;
+      
+      // State for batch
+      let currentFilePath = isBatch ? "" : savePath;
+      let currentFileHandle: FileHandle | null = null;
+      let partPath = "";
 
-      // Check for resume
-      let currentBytes = 0;
-      let startSeq = 0;
-
-      if (existsSync(partPath)) {
-        currentBytes = statSync(partPath).size;
-        // Truncate to nearest chunk boundary to avoid partial chunk corruption
-        currentBytes = Math.floor(currentBytes / this.CHUNK_SIZE) * this.CHUNK_SIZE;
-        startSeq = currentBytes / this.CHUNK_SIZE;
-      }
-
+      // Track progress
+      let batchCurrentBytes = 0;
+      
       const transferInfo: TransferInfo = {
         filename,
         size: totalSize,
-        progress: currentBytes,
+        progress: 0,
         speed: 0,
         status: "active",
         savePath,
+        isBatch,
+        totalFiles: 0, // Should be passed ideally, but we might not know
+        currentFileIndex: 0
       };
 
       this.activeTransfers.set(filename, transferInfo);
 
-      let fileHandle: FileHandle | null = null;
       let buffer = Buffer.alloc(0);
       let lastProgressUpdate = Date.now();
-      let lastBytes = currentBytes;
+      let lastBytes = 0;
 
       const cleanup = async () => {
-        if (fileHandle) await fileHandle.close();
+        if (currentFileHandle) await currentFileHandle.close();
         socket.destroy();
       };
 
       socket.connect(this.TRANSFER_PORT, host, async () => {
         try {
-          // Send handshake
-          socket.write(Buffer.from(JSON.stringify({ token, startSeq })));
-
-          // Open file for writing (append mode)
-          fileHandle = await open(partPath, currentBytes > 0 ? "r+" : "w");
-          if (currentBytes > 0) {
-            await fileHandle.truncate(currentBytes);
+          socket.write(Buffer.from(JSON.stringify({ token, startSeq: 0 })));
+          
+          if (!isBatch) {
+             // Prepare single file receiving immediately
+             partPath = `${savePath}.part`;
+             currentFileHandle = await open(partPath, "w");
           }
+          
         } catch (error) {
-          reject(error);
-          await cleanup();
+           reject(error);
+           await cleanup();
         }
       });
 
@@ -207,78 +276,116 @@ export class TransferManager extends EventEmitter {
           buffer = Buffer.concat([buffer, chunk]);
 
           while (buffer.length >= 4) {
-            // Read packet length
             const headerLength = buffer.readUInt32BE(0);
+            if (buffer.length < 4 + headerLength) break;
 
-            if (buffer.length < 4 + headerLength) break; // Wait for full header
-
-            // Parse header
             const headerJson = buffer.subarray(4, 4 + headerLength).toString();
-            const header: PacketHeader = JSON.parse(headerJson);
-
-            if (buffer.length < 4 + headerLength + header.size) break; // Wait for full data
-
-            // Extract binary data
-            const binaryData = buffer.subarray(
-              4 + headerLength,
-              4 + headerLength + header.size
-            );
-
-            // Verify hash
-            const calculatedHash = createHash("sha256")
-              .update(binaryData)
-              .digest("hex");
-
-            if (calculatedHash !== header.hash) {
-              transferInfo.status = "error";
-              transferInfo.error = "Data corruption detected";
-              this.emit("transferError", {
-                filename,
-                error: "Data corruption detected",
-              });
-              await cleanup();
-              reject(new Error("Data corruption"));
-              return;
+            
+            let header: PacketHeader;
+            try {
+                header = JSON.parse(headerJson);
+            } catch (e) {
+                 throw new Error("Invalid packet header");
             }
 
-            // Write to file
-            if (fileHandle) {
-              await fileHandle.write(binaryData, 0, header.size, currentBytes);
-              currentBytes += header.size;
+            // Packet Body Check
+            if (buffer.length < 4 + headerLength + header.size) break; 
 
-              // Update progress
-              transferInfo.progress = currentBytes;
+            // Extract binary data (only existing if header.size > 0)
+            const binaryData = header.size > 0 
+                ? buffer.subarray(4 + headerLength, 4 + headerLength + header.size)
+                : Buffer.alloc(0);
 
-              const now = Date.now();
-              if (now - lastProgressUpdate > 500) {
-                // Update every 500ms
+            // Handle Packet Type
+            if (header.type === "FILE_START") {
+                 // Close previous if any (safeguard)
+                 if (currentFileHandle) await currentFileHandle.close();
+                 
+                 if (!header.path) throw new Error("FILE_START missing path");
+                 
+                 // Create dir for file
+                 const fullPath = join(savePath, header.path);
+                 const fileDir = dirname(fullPath);
+                 if (!existsSync(fileDir)) {
+                     await mkdir(fileDir, { recursive: true });
+                 }
+                 
+                 currentFilePath = fullPath;
+                 partPath = `${fullPath}.part`;
+                 currentFileHandle = await open(partPath, "w");
+                 
+                 // Update Info
+                 transferInfo.currentFileIndex = (transferInfo.currentFileIndex || 0) + 1;
+                 
+                 // We don't have binary data here.
+                 
+            } else if (header.type === "BATCH_END") {
+                 if (currentFileHandle) await currentFileHandle.close();
+                 currentFileHandle = null;
+                 
+                 transferInfo.status = "complete";
+                 transferInfo.progress = totalSize; 
+                 this.emit("transferComplete", { filename, savePath });
+                 this.activeTransfers.delete(filename);
+                 socket.destroy();
+                 resolve();
+                 return;
+                 
+            } else if (header.type === "DATA" || !header.type) { // Default to DATA for backward compat if undefined?
+                 // Verify hash
+                 if (binaryData.length > 0) {
+                     const calculatedHash = createHash("sha256")
+                       .update(binaryData)
+                       .digest("hex");
+    
+                     if (header.hash && calculatedHash !== header.hash) {
+                       throw new Error("Data corruption");
+                     }
+                     
+                     // Write
+                     if (currentFileHandle) {
+                         await currentFileHandle.write(binaryData);
+                         batchCurrentBytes += header.size;
+                         transferInfo.progress = batchCurrentBytes; // Updates global progress
+                         // Note: totalSize passed to receiveFile should ideally be the Batch Size.
+                     }
+                 }
+                 
+                 if (header.isLast) {
+                     // End of current file
+                     if (currentFileHandle) await currentFileHandle.close();
+                     currentFileHandle = null;
+                     
+                     if (isBatch) {
+                        // Rename
+                        await rename(partPath, currentFilePath);
+                     } else {
+                        // Single file mode
+                        await rename(partPath, savePath);
+                        
+                        transferInfo.status = "complete";
+                        transferInfo.progress = totalSize;
+                        this.activeTransfers.delete(filename);
+                        this.emit("transferComplete", { filename, savePath });
+                        socket.destroy();
+                        resolve();
+                        return;
+                     }
+                 }
+            }
+
+            // Move Buffer
+            buffer = buffer.subarray(4 + headerLength + header.size);
+            
+            // Emit progress occasionally
+            const now = Date.now();
+            if (now - lastProgressUpdate > 500) {
                 const elapsed = (now - lastProgressUpdate) / 1000;
-                transferInfo.speed = (currentBytes - lastBytes) / elapsed;
+                transferInfo.speed = (batchCurrentBytes - lastBytes) / elapsed;
                 this.emit("transferProgress", { ...transferInfo });
                 lastProgressUpdate = now;
-                lastBytes = currentBytes;
-              }
-
-              // Check if complete
-              if (header.isLast) {
-                await fileHandle.close();
-                fileHandle = null;
-
-                // Rename .part to final file
-                await rename(partPath, savePath);
-
-                transferInfo.status = "complete";
-                transferInfo.progress = totalSize;
-                this.activeTransfers.delete(filename);
-                this.emit("transferComplete", { filename, savePath });
-                socket.destroy();
-                resolve();
-                return;
-              }
+                lastBytes = batchCurrentBytes;
             }
-
-            // Remove processed packet from buffer
-            buffer = buffer.subarray(4 + headerLength + header.size);
           }
         } catch (error) {
           transferInfo.status = "error";

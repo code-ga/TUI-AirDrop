@@ -211,9 +211,10 @@ const AppContent = () => {
           localIps={networkManager.localIps}
         />
       );
-    } else if (view === "send") {
+    } else if (view === "send-file" || view === "send-folder") {
       return (
         <FileExplorerView
+          mode={view === "send-folder" ? "folder" : "file"}
           onFileSelect={(file) => {
             setSelectedFile(file);
             push("recipients");

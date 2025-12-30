@@ -10,13 +10,20 @@ interface TransferProgressViewProps {
   error?: string;
 }
 
-export const TransferProgressView: React.FC<TransferProgressViewProps> = ({
+export const TransferProgressView: React.FC<TransferProgressViewProps & {
+  isBatch?: boolean;
+  currentFileIndex?: number;
+  totalFiles?: number;
+}> = ({
   filename,
   progress,
   size,
   speed,
   status,
   error,
+  isBatch,
+  currentFileIndex,
+  totalFiles,
 }) => {
   const percentage = size > 0 ? Math.floor((progress / size) * 100) : 0;
   const progressBar =
@@ -51,6 +58,9 @@ export const TransferProgressView: React.FC<TransferProgressViewProps> = ({
   };
 
   const getStatusText = () => {
+    if (isBatch && status === 'active') {
+        return `⬇ Batch ${currentFileIndex || '?'}/${totalFiles || '?'} files`;
+    }
     switch (status) {
       case "complete":
         return "✅ Complete";
@@ -71,7 +81,7 @@ export const TransferProgressView: React.FC<TransferProgressViewProps> = ({
       borderStyle="round"
       borderColor={getStatusColor()}
       paddingX={1}>
-      <Text bold>{filename}</Text>
+      <Text bold>{filename} {isBatch ? '(Folder)' : ''}</Text>
       <Box>
         <Text color={getStatusColor()}>{getStatusText()}</Text>
       </Box>

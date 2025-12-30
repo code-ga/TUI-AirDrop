@@ -3,7 +3,8 @@ import type { ReactNode } from "react";
 
 export type ViewName =
   | "menu"
-  | "send"
+  | "send-file"
+  | "send-folder"
   | "recipients"
   | "receive"
   | "settings"

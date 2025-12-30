@@ -16,17 +16,18 @@ export class MainMenuView extends MenuView<MainMenuProps> {
   protected override getMenuItems(): MenuItem[] {
     const { offeredFile } = this.props;
     const items: MenuItem[] = [
-      { label: "Send File", value: "send" },
-      { label: "View Online Users/Shares", value: "receive" },
-      { label: "Settings", value: "settings" },
-      { label: "Help", value: "help" },
+      { label: "🚀 Send File", value: "send-file" },
+      { label: "📦 Send Folder", value: "send-folder" },
+      { label: "📡 Wait for Transfer", value: "receive" },
+      { label: "⚙️  Settings", value: "settings" },
+      { label: "💡 Help", value: "help" },
     ];
 
     if (offeredFile) {
-      items.push({ label: "Stop Offering", value: "stop" });
+      items.push({ label: "🛑 Stop Offering", value: "stop" });
     }
 
-    items.push({ label: "Exit", value: "exit" });
+    items.push({ label: "👋 Exit", value: "exit" });
     return items;
   }
 
