@@ -7,9 +7,14 @@ import RecipientsView from "./views/RecipientsView";
 import ReceiveView from "./views/ReceiveView";
 import SettingsView from "./views/SettingsView";
 import SaveLocationView from "./views/SaveLocationView";
+import HelpView from "./views/HelpView";
 import { NavigationProvider, useNavigator } from "./core/Navigation";
 import { NetworkManager } from "./core/NetworkManager";
-import type { Peer, FileRequest, TransferReadyInfo } from "./core/NetworkManager";
+import type {
+  Peer,
+  FileRequest,
+  TransferReadyInfo,
+} from "./core/NetworkManager";
 import type { TransferInfo } from "./core/TransferManager";
 import TransferProgressView from "./components/TransferProgressView";
 import SavePathPrompt from "./components/SavePathPrompt";
@@ -19,11 +24,16 @@ const networkManager = new NetworkManager();
 const AppContent = () => {
   const { view, push, pop, reset } = useNavigator();
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
-  const [sharingApprovalMode, setSharingApprovalMode] = useState<"auto" | "manual">("manual");
+  const [sharingApprovalMode, setSharingApprovalMode] = useState<
+    "auto" | "manual"
+  >("manual");
   const [offeredFile, setOfferedFile] = useState<string | null>(null);
   const [peers, setPeers] = useState<Peer[]>([]);
-  const [pendingDownloadRequests, setPendingDownloadRequests] = useState<FileRequest[]>([]);
-  const [pendingTransfer, setPendingTransfer] = useState<TransferReadyInfo | null>(null);
+  const [pendingDownloadRequests, setPendingDownloadRequests] = useState<
+    FileRequest[]
+  >([]);
+  const [pendingTransfer, setPendingTransfer] =
+    useState<TransferReadyInfo | null>(null);
   const [activeTransfers, setActiveTransfers] = useState<TransferInfo[]>([]);
   const [currentShare, setCurrentShare] = useState<{
     from: string;
@@ -38,13 +48,13 @@ const AppContent = () => {
 
   useEffect(() => {
     networkManager.startDiscovery();
-    
+
     networkManager.on("peerUpdate", (updatedPeers: Peer[]) => {
       // if peer is already in the list, update it, else add it
-      setPeers(prev => {
+      setPeers((prev) => {
         const updated = [...prev];
-        updatedPeers.forEach(peer => {
-          const index = updated.findIndex(p => p.ip === peer.ip);
+        updatedPeers.forEach((peer) => {
+          const index = updated.findIndex((p) => p.ip === peer.ip);
           if (index !== -1) {
             updated[index] = peer;
           } else {
@@ -72,7 +82,9 @@ const AppContent = () => {
     });
 
     networkManager.on("transferComplete", (info) => {
-      setActiveTransfers((prev) => prev.filter((t) => t.filename !== info.filename));
+      setActiveTransfers((prev) =>
+        prev.filter((t) => t.filename !== info.filename)
+      );
       // Show completion notification
     });
 
@@ -81,11 +93,12 @@ const AppContent = () => {
         const index = prev.findIndex((t) => t.filename === info.filename);
         if (index !== -1) {
           const updated = [...prev];
-          if (updated[index]) updated[index] = { 
-            ...updated[index], 
-            status: "error" as const, 
-            error: info.error 
-          };
+          if (updated[index])
+            updated[index] = {
+              ...updated[index],
+              status: "error" as const,
+              error: info.error,
+            };
           return updated;
         }
         return prev;
@@ -100,7 +113,13 @@ const AppContent = () => {
   }, [sharingApprovalMode]);
 
   useEffect(() => {
-    networkManager.offering = offeredFile ? { filename: offeredFile.split(/[/\\]/).pop() || offeredFile, size: 0, filePath: offeredFile } : null;
+    networkManager.offering = offeredFile
+      ? {
+          filename: offeredFile.split(/[/\\]/).pop() || offeredFile,
+          size: 0,
+          filePath: offeredFile,
+        }
+      : null;
   }, [offeredFile]);
 
   useInput((input, key) => {
@@ -112,10 +131,17 @@ const AppContent = () => {
   const handleShareAction = async (action: "accept" | "decline", data: any) => {
     if (action === "accept") {
       const { peer, file } = data;
-      const transferInfo = await networkManager.requestFile(peer.ip, file.filename);
+      const transferInfo = await networkManager.requestFile(
+        peer.ip,
+        file.filename
+      );
       if (transferInfo) {
         setPendingTransfer(transferInfo);
-        setCurrentShare({ from: peer.displayName, file: file.filename, size: transferInfo.size });
+        setCurrentShare({
+          from: peer.displayName,
+          file: file.filename,
+          size: transferInfo.size,
+        });
       } else {
         // Handle rejection or error
       }
@@ -178,7 +204,13 @@ const AppContent = () => {
 
   const renderLeftPanel = () => {
     if (view === "menu") {
-      return <MainMenuView onSelect={handleSelect} offeredFile={offeredFile} />;
+      return (
+        <MainMenuView
+          onSelect={handleSelect}
+          offeredFile={offeredFile}
+          localIps={networkManager.localIps}
+        />
+      );
     } else if (view === "send") {
       return (
         <FileExplorerView
@@ -199,9 +231,14 @@ const AppContent = () => {
           onBack={pop}
         />
       );
+    } else if (view === "help") {
+      return <HelpView onBack={pop} />;
     } else if (view === "save-share" && currentShare) {
       return (
-        <SaveLocationView onSaveDir={handleSaveDir} currentShare={currentShare} />
+        <SaveLocationView
+          onSaveDir={handleSaveDir}
+          currentShare={currentShare}
+        />
       );
     }
     return <Text>Left Panel</Text>;
@@ -217,7 +254,6 @@ const AppContent = () => {
         width="50%"
         borderStyle="single"
         borderColor="blue">
-        
         {/* Save Path Prompt */}
         {pendingTransfer && (
           <SavePathPrompt
@@ -232,7 +268,9 @@ const AppContent = () => {
         {/* Active Transfers */}
         {activeTransfers.length > 0 && (
           <Box flexDirection="column" marginTop={1}>
-            <Text bold underline>Active Transfers</Text>
+            <Text bold underline>
+              Active Transfers
+            </Text>
             {activeTransfers.map((transfer) => (
               <Box key={transfer.filename} marginTop={1}>
                 <TransferProgressView
@@ -258,7 +296,7 @@ const AppContent = () => {
           onShareAction={handleShareAction}
           onDownloadApproval={(req, approved) => {
             req.approve(approved);
-            setPendingDownloadRequests(prev => prev.filter(r => r !== req));
+            setPendingDownloadRequests((prev) => prev.filter((r) => r !== req));
           }}
           onBack={pop}
         />

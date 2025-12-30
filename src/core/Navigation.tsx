@@ -1,7 +1,15 @@
 import React, { createContext, useContext, useState } from "react";
 import type { ReactNode } from "react";
 
-export type ViewName = "menu" | "send" | "recipients" | "receive" | "settings" | "save-share" | "confirm-save";
+export type ViewName =
+  | "menu"
+  | "send"
+  | "recipients"
+  | "receive"
+  | "settings"
+  | "save-share"
+  | "confirm-save"
+  | "help";
 
 interface NavigationState {
   currentView: ViewName;
@@ -15,9 +23,13 @@ interface NavigationContextType {
   reset: () => void;
 }
 
-export const NavigationContext = createContext<NavigationContextType | undefined>(undefined);
+export const NavigationContext = createContext<
+  NavigationContextType | undefined
+>(undefined);
 
-export const NavigationProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+export const NavigationProvider: React.FC<{ children: ReactNode }> = ({
+  children,
+}) => {
   const [state, setState] = useState<NavigationState>({
     currentView: "menu",
     history: ["menu"],
@@ -46,11 +58,12 @@ export const NavigationProvider: React.FC<{ children: ReactNode }> = ({ children
   };
 
   const reset = () => {
-    setState(prev => ({ ...prev, currentView: "menu", history: ["menu"] }));
+    setState((prev) => ({ ...prev, currentView: "menu", history: ["menu"] }));
   };
 
   return (
-    <NavigationContext.Provider value={{ view: state.currentView, push, pop, reset }}>
+    <NavigationContext.Provider
+      value={{ view: state.currentView, push, pop, reset }}>
       {children}
     </NavigationContext.Provider>
   );
@@ -58,6 +71,7 @@ export const NavigationProvider: React.FC<{ children: ReactNode }> = ({ children
 
 export const useNavigator = () => {
   const context = useContext(NavigationContext);
-  if (!context) throw new Error("useNavigator must be used within NavigationProvider");
+  if (!context)
+    throw new Error("useNavigator must be used within NavigationProvider");
   return context;
 };

@@ -1,5 +1,6 @@
 import React from "react";
 import { Text, Box } from "ink";
+import Spinner from "ink-spinner";
 import { BaseView } from "../core/BaseView";
 import CustomSelectInput from "../components/CustomSelectInput";
 
@@ -29,15 +30,21 @@ export class ReceiveView extends BaseView<ReceiveViewProps> {
       onBack,
     } = this.props;
 
-    const menuItems: any[] = (peers
-      .filter((p) => p.offering)
-      .flatMap((peer, index) => [
-        {
-          key: `accept-${peer.ip}-${index}`,
-          label: `[Get] ${peer.offering!.filename} from ${peer.displayName}`,
-          value: { type: "incoming", action: "accept", data: { peer, file: peer.offering } },
-        },
-      ]) as any[])
+    const menuItems: any[] = (
+      peers
+        .filter((p) => p.offering)
+        .flatMap((peer, index) => [
+          {
+            key: `accept-${peer.ip}-${index}`,
+            label: `[Get] ${peer.offering!.filename} from ${peer.displayName}`,
+            value: {
+              type: "incoming",
+              action: "accept",
+              data: { peer, file: peer.offering },
+            },
+          },
+        ]) as any[]
+    )
       .concat(
         pendingDownloadRequests.flatMap((req, index) => [
           {
@@ -66,11 +73,16 @@ export class ReceiveView extends BaseView<ReceiveViewProps> {
     return (
       <Box flexDirection="column">
         {offeredFile && (
-          <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
+          <Box
+            flexDirection="column"
+            borderStyle="round"
+            borderColor="cyan"
+            paddingX={1}>
             <Text bold>My Shared File:</Text>
             <Text>{offeredFile}</Text>
             <Text color="gray">
-              Mode: {sharingApprovalMode === "auto" ? "Broadcast" : "Restricted"}
+              Mode:{" "}
+              {sharingApprovalMode === "auto" ? "Broadcast" : "Restricted"}
             </Text>
           </Box>
         )}
@@ -86,7 +98,19 @@ export class ReceiveView extends BaseView<ReceiveViewProps> {
         </Box>
 
         <Text color="gray">Online Users: {peers.length}</Text>
-        
+
+        <Box>
+          <Spinner type="dots" />
+          <Text> Scanning for peers...</Text>
+        </Box>
+
+        {peers.length === 0 && (
+          <Text color="yellow">
+            No peers found. Is the other device running the app on the same
+            Wi-Fi?
+          </Text>
+        )}
+
         <Box flexDirection="column" marginTop={1}>
           <Text bold>Action Required:</Text>
           {menuItems.length > 1 ? (
@@ -105,13 +129,17 @@ export class ReceiveView extends BaseView<ReceiveViewProps> {
               }}
             />
           ) : (
-            <Text italic color="gray"> No pending actions</Text>
+            <Text italic color="gray">
+              {" "}
+              No pending actions
+            </Text>
           )}
         </Box>
 
-        {pendingDownloadRequests.length > 0 && sharingApprovalMode === "auto" && (
-          <Text color="yellow">Auto-approving download requests...</Text>
-        )}
+        {pendingDownloadRequests.length > 0 &&
+          sharingApprovalMode === "auto" && (
+            <Text color="yellow">Auto-approving download requests...</Text>
+          )}
       </Box>
     );
   }

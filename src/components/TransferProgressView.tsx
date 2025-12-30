@@ -19,8 +19,10 @@ export const TransferProgressView: React.FC<TransferProgressViewProps> = ({
   error,
 }) => {
   const percentage = size > 0 ? Math.floor((progress / size) * 100) : 0;
-  const progressBar = "█".repeat(Math.floor(percentage / 5)) + "░".repeat(20 - Math.floor(percentage / 5));
-  
+  const progressBar =
+    "█".repeat(Math.floor(percentage / 5)) +
+    "░".repeat(20 - Math.floor(percentage / 5));
+
   const formatBytes = (bytes: number): string => {
     if (bytes === 0) return "0 B";
     const k = 1024;
@@ -51,9 +53,9 @@ export const TransferProgressView: React.FC<TransferProgressViewProps> = ({
   const getStatusText = () => {
     switch (status) {
       case "complete":
-        return "✓ Complete";
+        return "✅ Complete";
       case "error":
-        return `✗ Error: ${error}`;
+        return `❌ Error: ${error}`;
       case "paused":
         return "⏸ Paused";
       case "active":
@@ -64,13 +66,19 @@ export const TransferProgressView: React.FC<TransferProgressViewProps> = ({
   };
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={getStatusColor()} paddingX={1}>
+    <Box
+      flexDirection="column"
+      borderStyle="round"
+      borderColor={getStatusColor()}
+      paddingX={1}>
       <Text bold>{filename}</Text>
       <Box>
         <Text color={getStatusColor()}>{getStatusText()}</Text>
       </Box>
       <Box marginTop={1}>
-        <Text>{progressBar} {percentage}%</Text>
+        <Text>
+          {progressBar} {percentage}%
+        </Text>
       </Box>
       <Box justifyContent="space-between">
         <Text color="gray">
