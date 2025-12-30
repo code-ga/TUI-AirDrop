@@ -7,6 +7,7 @@ import { stat } from "node:fs/promises";
 import EventEmitter from "node:events";
 import { TransferManager } from "./TransferManager";
 import type { TransferInfo } from "./TransferManager";
+import { scanDirectory } from "./FileSystemUtils";
 
 export interface Peer {
   displayName: string;
@@ -30,6 +31,7 @@ export interface TransferReadyInfo {
   filename: string;
   size: number;
   filePath: string;
+  isBatch: boolean;
 }
 
 export interface NetworkManagerEvents {
@@ -223,7 +225,13 @@ export class NetworkManager extends EventEmitter {
         try {
           // Get file stats
           const stats = await stat(this.offering.filePath);
-          const fileSize = stats.size;
+          const isBatch = stats.isDirectory();
+          let fileSize = stats.size;
+
+          if (isBatch) {
+            const files = await scanDirectory(this.offering.filePath);
+            fileSize = files.reduce((acc, f) => acc + f.size, 0);
+          }
           
           // Generate token
           const token = this.generateToken(this.offering.filePath, fromIp);
@@ -237,6 +245,7 @@ export class NetworkManager extends EventEmitter {
             filename: fileName,
             size: fileSize,
             filePath: this.offering.filePath,
+            isBatch: isBatch,
           };
           
           socket.write(JSON.stringify(response));
@@ -326,7 +335,8 @@ export class NetworkManager extends EventEmitter {
       transferInfo.token,
       savePath,
       transferInfo.filename,
-      transferInfo.size
+      transferInfo.size,
+      transferInfo.isBatch
     );
   }
 

@@ -2,8 +2,15 @@ import { BaseView } from "./BaseView";
 import fs from "node:fs";
 import path from "node:path";
 
+export interface DirectoryItem {
+  label: string;
+  value: string;
+  isDir: boolean;
+}
+
 export interface DirectoryState {
   currentDir: string;
+  items: DirectoryItem[];
 }
 
 export abstract class DirectoryView<P = {}, S extends DirectoryState = DirectoryState> extends BaseView<P, S> {
@@ -11,10 +18,21 @@ export abstract class DirectoryView<P = {}, S extends DirectoryState = Directory
     super(props);
     this.state = {
       currentDir: process.cwd(),
-    } as S;
+      items: [],
+    } as unknown as S;
   }
 
-  protected getDirectoryItems(showOnlyDirs: boolean = false) {
+  override componentDidMount() {
+    this.refreshDirectoryItems();
+  }
+
+  override componentDidUpdate(_prevProps: P, prevState: S) {
+    if (prevState.currentDir !== this.state.currentDir) {
+      this.refreshDirectoryItems();
+    }
+  }
+
+  protected refreshDirectoryItems() {
     const { currentDir } = this.state;
     try {
       const entries = fs.readdirSync(currentDir).map((name) => {
@@ -31,22 +49,27 @@ export abstract class DirectoryView<P = {}, S extends DirectoryState = Directory
         }
       });
 
-      let items = entries;
-      if (showOnlyDirs) {
-        items = entries.filter((item) => item.isDir);
-      }
-
       // Sort: Directories first, then alphabetically
-      items.sort((a, b) => {
+      entries.sort((a, b) => {
         if (a.isDir && !b.isDir) return -1;
         if (!a.isDir && b.isDir) return 1;
         return a.label.localeCompare(b.label);
       });
 
-      return [{ label: `.. (Up one level)`, value: "..", isDir: true }, ...items];
-    } catch {
-      return [{ label: "Error reading directory", value: "error", isDir: false }];
+      const items = [{ label: `.. (Up one level)`, value: "..", isDir: true }, ...entries];
+      this.setState({ items } as any);
+    } catch (e) {
+      this.setState({
+        items: [{ label: "Error reading directory", value: "error", isDir: false }]
+      } as any);
     }
+  }
+
+  protected getDirectoryItems(showOnlyDirs: boolean = false) {
+    if (showOnlyDirs) {
+      return this.state.items.filter((item) => item.isDir);
+    }
+    return this.state.items;
   }
 
   protected getFullPath(fileName: string) {

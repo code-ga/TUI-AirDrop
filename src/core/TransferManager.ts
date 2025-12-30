@@ -226,7 +226,10 @@ export class TransferManager extends EventEmitter {
       // State for batch
       let currentFilePath = isBatch ? "" : savePath;
       let currentFileHandle: FileHandle | null = null;
-      let partPath = "";
+      let partPath = isBatch ? "" : `${savePath}.part`;
+
+      // Internal flag to track if we've switched to batch mode dynamically
+      let isActuallyBatch = isBatch;
 
       // Track progress
       let batchCurrentBytes = 0;
@@ -303,6 +306,8 @@ export class TransferManager extends EventEmitter {
                  
                  if (!header.path) throw new Error("FILE_START missing path");
                  
+                 isActuallyBatch = true;
+
                  // Create dir for file
                  const fullPath = join(savePath, header.path);
                  const fileDir = dirname(fullPath);
@@ -356,13 +361,13 @@ export class TransferManager extends EventEmitter {
                      if (currentFileHandle) await currentFileHandle.close();
                      currentFileHandle = null;
                      
-                     if (isBatch) {
-                        // Rename
+                     // Rename current file
+                     if (partPath && currentFilePath) {
                         await rename(partPath, currentFilePath);
-                     } else {
+                     }
+
+                     if (!isActuallyBatch) {
                         // Single file mode
-                        await rename(partPath, savePath);
-                        
                         transferInfo.status = "complete";
                         transferInfo.progress = totalSize;
                         this.activeTransfers.delete(filename);

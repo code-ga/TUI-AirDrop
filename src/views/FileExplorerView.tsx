@@ -34,24 +34,13 @@ const FilterHandler: React.FC<{
     
     if (key.backspace || key.delete) {
       onUpdate(currentFilter.slice(0, -1));
-    } else if (input && !key.ctrl && !key.meta && !key.return && input !== ' ') {
-       // Filter typing. Block space if used for selection?
-       // If filter is active, space might be part of filename?
-       // User requirement: "Space to select folder". 
-       // If I type "My Folder", I need space.
-       // CONFLICT: Space for selection vs Space for filtering.
-       // Filter usually disables navigation keys.
-       // Current logic: Navigation works even when filtering?
-       // `CustomSelectInput` handles arrow keys.
-       // If I type, it updates filter.
-       
-       // Let's allow Space in filter IF filter is not empty?
-       // Or: Space is select ONLY when highlighting the list.
-       // If users wants to type space in filter, they might be blocked.
-       // COMPROMISE: If input is space, AND we have a highlighted item that is a folder, AND we are in folder mode...
-       // We should probably prioritize selection if query is empty.
-       
-       onUpdate(currentFilter + input);
+    } else if (input && !key.ctrl && !key.meta && !key.return) {
+       // Allow space in filter, but prioritize selection if filter is empty
+       if (input === ' ' && !currentFilter) {
+           // Do nothing here, allow parent onEvent to handle selection
+       } else {
+           onUpdate(currentFilter + input);
+       }
     } else if (key.escape && currentFilter) {
       onUpdate("");
     }
@@ -60,21 +49,21 @@ const FilterHandler: React.FC<{
 };
 
 export class FileExplorerView extends DirectoryView<FileExplorerProps, FileExplorerState> {
-  constructor(props: FileExplorerProps) {
+  constructor( props: FileExplorerProps) {
     super(props);
     this.state = {
       currentDir: process.cwd(),
       filter: "",
-      highlightedItem: null
+      highlightedItem: null,
+      items: []
     };
   }
 
   override render() {
     const allItems = this.getDirectoryItems();
-    const filteredItems = allItems.filter(item => 
-      item.value === ".." || 
-      item.label.toLowerCase().includes(this.state.filter.toLowerCase())
-    );
+    const filteredItems = (allItems || [])
+      .filter(item => this.props.mode === 'folder' ? item.isDir : true)
+      .filter(item => item.value !== ".." ||item.label.toLowerCase().includes(this.state.filter.toLowerCase()));
 
     return (
       <Box flexDirection="column" paddingX={1}>
@@ -83,10 +72,8 @@ export class FileExplorerView extends DirectoryView<FileExplorerProps, FileExplo
           onUpdate={(filter) => this.setState({ filter })} 
           onEvent={(input, key) => {
              // Handle Space Selection for Folders
-             // Only if filter is NOT actively capturing generic typing? 
-             // Ideally we want standard file explorer behavior.
-             // If I press space, it toggles select.
-             if (this.props.mode === 'folder' && input === ' ' && this.state.highlightedItem) {
+             // Only if filter is empty (prioritize filter typing if active)
+             if (this.props.mode === 'folder' && input === ' ' && this.state.highlightedItem && !this.state.filter) {
                  const item = this.state.highlightedItem;
                  if (item.value !== ".." && item.isDir) {
                      this.props.onFileSelect(this.getFullPath(item.value));
@@ -106,7 +93,7 @@ export class FileExplorerView extends DirectoryView<FileExplorerProps, FileExplo
         <Box flexDirection="column" marginTop={1}>
           <Text dimColor>Items: {filteredItems.length} / {allItems.length}</Text>
           <CustomSelectInput
-            id="send"
+            id={this.props.mode === 'folder' ? 'send-folder' : 'send-file'}
             items={filteredItems}
             onHighlight={(item) => this.setState({ highlightedItem: item })}
             onSelect={(item) => {
@@ -117,12 +104,15 @@ export class FileExplorerView extends DirectoryView<FileExplorerProps, FileExplo
           />
         </Box>
         
-        <Box marginTop={1}>
+        <Box marginTop={1} flexDirection="column">
           <Text color="gray">↑/↓: Navigate • Enter: {this.props.mode === 'folder' ? 'Open Folder' : 'Select File'}</Text>
+          <Text color="gray">Type: Filter • Esc: Clear Filter</Text>
           {this.props.mode === 'folder' && (
               <Text color="green">SPACE: Select Highlighted Folder</Text>
           )}
-          <Text color="gray">Type: Filter • Esc: Clear Filter</Text>
+          {this.props.mode === 'folder' && (
+            <Text color="red">BY DEFAULT, SPACE SELECTS THE CURRENT FOLDER, AND CLI AUTO SKIP FOLDER START WITH ""."</Text>
+            )}
         </Box>
       </Box>
     );
