@@ -8,12 +8,14 @@ import ReceiveView from "./views/ReceiveView";
 import SettingsView from "./views/SettingsView";
 import SaveLocationView from "./views/SaveLocationView";
 import HelpView from "./views/HelpView";
+import ChatView from "./views/ChatView";
 import { NavigationProvider, useNavigator } from "./core/Navigation";
 import { NetworkManager } from "./core/NetworkManager";
 import type {
   Peer,
   FileRequest,
   TransferReadyInfo,
+  ChatMessage,
 } from "./core/NetworkManager";
 import type { TransferInfo } from "./core/TransferManager";
 import TransferProgressView from "./components/TransferProgressView";
@@ -40,6 +42,8 @@ const AppContent = () => {
     file: string;
     size: string | number;
   } | null>(null);
+  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
+  const [unreadCount, setUnreadCount] = useState<number>(0);
   const { setFocus } = useContext(FocusContext);
 
   useEffect(() => {
@@ -103,6 +107,16 @@ const AppContent = () => {
         }
         return prev;
       });
+    });
+
+    networkManager.on("chatMessage", (message: ChatMessage) => {
+      setChatHistory((prev) => {
+        const newHistory = [...prev, message];
+        return newHistory.slice(-50);
+      });
+      if (view !== "chat") {
+        setUnreadCount((prev) => prev + 1);
+      }
     });
 
     return () => networkManager.stopDiscovery();
@@ -187,6 +201,9 @@ const AppContent = () => {
       process.exit(0);
     } else if (item.value === "stop") {
       setOfferedFile(null);
+    } else if (item.value === "chat") {
+      setUnreadCount(0);
+      push(item.value);
     } else {
       push(item.value);
     }
@@ -209,6 +226,7 @@ const AppContent = () => {
           onSelect={handleSelect}
           offeredFile={offeredFile}
           localIps={networkManager.localIps}
+          unreadCount={unreadCount}
         />
       );
     } else if (view === "send-file" || view === "send-folder") {
@@ -234,6 +252,14 @@ const AppContent = () => {
       );
     } else if (view === "help") {
       return <HelpView onBack={pop} />;
+    } else if (view === "chat") {
+      return (
+        <ChatView
+          chatHistory={chatHistory}
+          onSend={(text) => networkManager.sendMessage(text)}
+          onBack={pop}
+        />
+      );
     } else if (view === "save-share" && currentShare) {
       return (
         <SaveLocationView

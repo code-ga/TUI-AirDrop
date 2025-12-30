@@ -10,14 +10,19 @@ interface MainMenuProps {
   onSelect: (item: any) => void;
   offeredFile: string | null;
   localIps: string[];
+  unreadCount: number;
 }
 
 export class MainMenuView extends MenuView<MainMenuProps> {
   protected override getMenuItems(): MenuItem[] {
-    const { offeredFile } = this.props;
+    const { offeredFile, unreadCount } = this.props;
     const items: MenuItem[] = [
       { label: "🚀 Send File", value: "send-file" },
       { label: "📦 Send Folder", value: "send-folder" },
+      {
+        label: unreadCount > 0 ? `💬 Chat (${unreadCount} new)` : "💬 Chat",
+        value: "chat",
+      },
       { label: "📡 Wait for Transfer", value: "receive" },
       { label: "⚙️  Settings", value: "settings" },
       { label: "💡 Help", value: "help" },

@@ -10,7 +10,8 @@ export type ViewName =
   | "settings"
   | "save-share"
   | "confirm-save"
-  | "help";
+  | "help"
+  | "chat";
 
 interface NavigationState {
   currentView: ViewName;

@@ -34,6 +34,12 @@ export interface TransferReadyInfo {
   isBatch: boolean;
 }
 
+export interface ChatMessage {
+  sender: string;
+  text: string;
+  timestamp: number;
+}
+
 export interface NetworkManagerEvents {
   peerUpdate: (peers: Peer[]) => void;
   fileRequest: (req: FileRequest) => void;
@@ -41,6 +47,7 @@ export interface NetworkManagerEvents {
   transferProgress: (info: TransferInfo) => void;
   transferComplete: (info: { filename: string; savePath: string }) => void;
   transferError: (info: { filename: string; error: string }) => void;
+  chatMessage: (message: ChatMessage) => void;
 }
 
 export class NetworkManager extends EventEmitter {
@@ -53,10 +60,15 @@ export class NetworkManager extends EventEmitter {
   private transferManager: TransferManager;
   private lastRequestTime = new Map<string, number>();
   private activeRequests = new Set<string>();
+  private meshConnections = new Map<string, Socket>();
 
   public displayName: string = hostname();
   public localIps: string[] = [];
-  public offering: { filename: string; size: number; filePath?: string } | null = null;
+  public offering: {
+    filename: string;
+    size: number;
+    filePath?: string;
+  } | null = null;
   public sharingMode: "auto" | "manual" = "manual";
 
   private UDP_PORT = 8888;
@@ -68,16 +80,24 @@ export class NetworkManager extends EventEmitter {
     this.UDP_PORT = udpPort;
     this.CONTROL_PORT = controlPort;
     this.TRANSFER_PORT = transferPort;
-    
+
     // Initialize TransferManager
     this.transferManager = new TransferManager(transferPort);
-    this.transferManager.setTokenValidator((token, ip) => this.verifyToken(token, ip));
-    
+    this.transferManager.setTokenValidator((token, ip) =>
+      this.verifyToken(token, ip)
+    );
+
     // Forward transfer events
-    this.transferManager.on("transferProgress", (info) => this.emit("transferProgress", info));
-    this.transferManager.on("transferComplete", (info) => this.emit("transferComplete", info));
-    this.transferManager.on("transferError", (info) => this.emit("transferError", info));
-    
+    this.transferManager.on("transferProgress", (info) =>
+      this.emit("transferProgress", info)
+    );
+    this.transferManager.on("transferComplete", (info) =>
+      this.emit("transferComplete", info)
+    );
+    this.transferManager.on("transferError", (info) =>
+      this.emit("transferError", info)
+    );
+
     this.setupUdp();
     this.setupControlServer();
   }
@@ -97,6 +117,11 @@ export class NetworkManager extends EventEmitter {
 
         this.peers.set(peer.ip, peer);
         this.emit("peerUpdate", Array.from(this.peers.values()));
+
+        // Auto-connect mesh: initiate TCP connection if not already connected
+        if (!this.meshConnections.has(peer.ip)) {
+          this.connectToPeer(peer.ip);
+        }
       } catch (e) {
         // Ignore invalid packets
       }
@@ -136,6 +161,11 @@ export class NetworkManager extends EventEmitter {
     this.stopDiscovery();
     this.udpSocket.close();
     await this.transferManager.close();
+    // Close all mesh connections
+    for (const socket of this.meshConnections.values()) {
+      socket.destroy();
+    }
+    this.meshConnections.clear();
     return new Promise((resolve) => {
       this.controlServer.close(() => resolve());
     });
@@ -143,7 +173,7 @@ export class NetworkManager extends EventEmitter {
 
   private broadcastHeartbeat() {
     this.localIps = NetworkManager.getLocalIps(); // Refresh periodically
-    
+
     for (const ip of this.localIps) {
       const payload = JSON.stringify({
         displayName: this.displayName,
@@ -162,6 +192,11 @@ export class NetworkManager extends EventEmitter {
     let changed = false;
     for (const [ip, peer] of this.peers.entries()) {
       if (now - peer.lastSeen > 10000) {
+        // Close mesh connection if exists
+        if (this.meshConnections.has(ip)) {
+          this.meshConnections.get(ip)!.destroy();
+          this.meshConnections.delete(ip);
+        }
         this.peers.delete(ip);
         changed = true;
       }
@@ -171,14 +206,29 @@ export class NetworkManager extends EventEmitter {
     }
   }
 
+  private connectToPeer(ip: string): void {
+    const socket = new Socket();
+    socket.connect(this.CONTROL_PORT, ip, () => {
+      this.meshConnections.set(ip, socket);
+    });
+    socket.on("close", () => {
+      this.meshConnections.delete(ip);
+    });
+    socket.on("error", () => {
+      this.meshConnections.delete(ip);
+    });
+  }
+
   private setupControlServer() {
     this.controlServer.on("connection", (socket) => {
       const fromIp = socket.remoteAddress?.replace(/^.*:/, "") || "";
-      
-      socket.once("data", async (data) => {
+
+      socket.on("data", async (data) => {
         try {
           const req = JSON.parse(data.toString());
-          if (req.type === "request_file") {
+          if (req.type === "CHAT") {
+            this.emit("chatMessage", req as ChatMessage);
+          } else if (req.type === "request_file") {
             await this.handleFileRequest(socket, fromIp, req.fileName);
           }
         } catch (e) {
@@ -191,10 +241,16 @@ export class NetworkManager extends EventEmitter {
     this.controlServer.listen(this.CONTROL_PORT);
   }
 
-  private async handleFileRequest(socket: Socket, fromIp: string, fileName: string) {
+  private async handleFileRequest(
+    socket: Socket,
+    fromIp: string,
+    fileName: string
+  ) {
     // Validate file exists and matches offering
     if (!this.offering || this.offering.filename !== fileName) {
-      socket.write(JSON.stringify({ approved: false, reason: "File not available" }));
+      socket.write(
+        JSON.stringify({ approved: false, reason: "File not available" })
+      );
       socket.end();
       return;
     }
@@ -205,7 +261,12 @@ export class NetworkManager extends EventEmitter {
     const now = Date.now();
     const lastTime = this.lastRequestTime.get(fromIp) || 0;
     if (now - lastTime < 2000) {
-      socket.write(JSON.stringify({ approved: false, reason: "Rate limit exceeded. Please wait." }));
+      socket.write(
+        JSON.stringify({
+          approved: false,
+          reason: "Rate limit exceeded. Please wait.",
+        })
+      );
       socket.end();
       return;
     }
@@ -213,15 +274,25 @@ export class NetworkManager extends EventEmitter {
 
     // Prevent duplicate pending requests for the same file
     if (this.activeRequests.has(requestKey)) {
-      socket.write(JSON.stringify({ approved: false, reason: "Request for this file is already pending approval." }));
+      socket.write(
+        JSON.stringify({
+          approved: false,
+          reason: "Request for this file is already pending approval.",
+        })
+      );
       socket.end();
       return;
     }
 
     const approve = async (approved: boolean) => {
       this.activeRequests.delete(requestKey);
-      
-      if (approved && this.offering && this.offering.filename === fileName && this.offering.filePath) {
+
+      if (
+        approved &&
+        this.offering &&
+        this.offering.filename === fileName &&
+        this.offering.filePath
+      ) {
         try {
           // Get file stats
           const stats = await stat(this.offering.filePath);
@@ -232,10 +303,10 @@ export class NetworkManager extends EventEmitter {
             const files = await scanDirectory(this.offering.filePath);
             fileSize = files.reduce((acc, f) => acc + f.size, 0);
           }
-          
+
           // Generate token
           const token = this.generateToken(this.offering.filePath, fromIp);
-          
+
           // Send comprehensive response
           const response: TransferReadyInfo = {
             approved: true,
@@ -247,13 +318,20 @@ export class NetworkManager extends EventEmitter {
             filePath: this.offering.filePath,
             isBatch: isBatch,
           };
-          
+
           socket.write(JSON.stringify(response));
         } catch (error) {
-          socket.write(JSON.stringify({ approved: false, reason: "File not found" }));
+          socket.write(
+            JSON.stringify({ approved: false, reason: "File not found" })
+          );
         }
       } else {
-        socket.write(JSON.stringify({ approved: false, reason: approved ? "File not shared" : "Denied by host" }));
+        socket.write(
+          JSON.stringify({
+            approved: false,
+            reason: approved ? "File not shared" : "Denied by host",
+          })
+        );
       }
       socket.end();
     };
@@ -262,8 +340,13 @@ export class NetworkManager extends EventEmitter {
       await approve(true);
     } else {
       this.activeRequests.add(requestKey);
-      this.emit("fileRequest", { fromIp, fileName, filePath: this.offering.filePath || "", approve });
-      
+      this.emit("fileRequest", {
+        fromIp,
+        fileName,
+        filePath: this.offering.filePath || "",
+        approve,
+      });
+
       // Auto-cleanup request if not answered within 60 seconds
       setTimeout(() => {
         if (this.activeRequests.has(requestKey)) {
@@ -276,7 +359,7 @@ export class NetworkManager extends EventEmitter {
   public generateToken(filePath: string, recipientIp: string): string {
     const token = randomBytes(16).toString("hex");
     this.tokens.set(token, { filePath, ip: recipientIp });
-    
+
     // TTL 30 seconds
     setTimeout(() => {
       this.tokens.delete(token);
@@ -295,7 +378,10 @@ export class NetworkManager extends EventEmitter {
     return null;
   }
 
-  public async requestFile(peerIp: string, fileName: string): Promise<TransferReadyInfo | null> {
+  public async requestFile(
+    peerIp: string,
+    fileName: string
+  ): Promise<TransferReadyInfo | null> {
     return new Promise((resolve) => {
       const socket = new Socket();
       socket.connect(this.CONTROL_PORT, peerIp, () => {
@@ -345,5 +431,26 @@ export class NetworkManager extends EventEmitter {
    */
   public getActiveTransfers(): TransferInfo[] {
     return this.transferManager.getActiveTransfers();
+  }
+
+  /**
+   * Send a chat message to all connected peers
+   */
+  public async sendMessage(text: string): Promise<void> {
+    const message: ChatMessage = {
+      sender: this.displayName,
+      text,
+      timestamp: Date.now(),
+    };
+    this.emit("chatMessage", message);
+
+    const packet = JSON.stringify({ type: "CHAT", ...message }) + "\n";
+    for (const socket of this.meshConnections.values()) {
+      if (!socket.write(packet)) {
+        await new Promise<void>((resolve) => {
+          socket.once("drain", () => resolve());
+        });
+      }
+    }
   }
 }
