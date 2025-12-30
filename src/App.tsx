@@ -256,8 +256,8 @@ const AppContent = () => {
           pendingDownloadRequests={pendingDownloadRequests}
           currentShare={currentShare}
           onShareAction={handleShareAction}
-          onDownloadApproval={(req) => {
-            req.approve(true);
+          onDownloadApproval={(req, approved) => {
+            req.approve(approved);
             setPendingDownloadRequests(prev => prev.filter(r => r !== req));
           }}
           onBack={pop}

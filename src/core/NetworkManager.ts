@@ -49,6 +49,8 @@ export class NetworkManager extends EventEmitter {
   private controlServer = createServer();
   private tokens = new Map<string, { filePath: string; ip: string }>();
   private transferManager: TransferManager;
+  private lastRequestTime = new Map<string, number>();
+  private activeRequests = new Set<string>();
 
   public displayName: string = hostname();
   public localIps: string[] = [];
@@ -188,7 +190,35 @@ export class NetworkManager extends EventEmitter {
   }
 
   private async handleFileRequest(socket: Socket, fromIp: string, fileName: string) {
+    // Validate file exists and matches offering
+    if (!this.offering || this.offering.filename !== fileName) {
+      socket.write(JSON.stringify({ approved: false, reason: "File not available" }));
+      socket.end();
+      return;
+    }
+
+    const requestKey = `${fromIp}:${fileName}`;
+
+    // Rate limiting: 2 seconds between requests from the same IP
+    const now = Date.now();
+    const lastTime = this.lastRequestTime.get(fromIp) || 0;
+    if (now - lastTime < 2000) {
+      socket.write(JSON.stringify({ approved: false, reason: "Rate limit exceeded. Please wait." }));
+      socket.end();
+      return;
+    }
+    this.lastRequestTime.set(fromIp, now);
+
+    // Prevent duplicate pending requests for the same file
+    if (this.activeRequests.has(requestKey)) {
+      socket.write(JSON.stringify({ approved: false, reason: "Request for this file is already pending approval." }));
+      socket.end();
+      return;
+    }
+
     const approve = async (approved: boolean) => {
+      this.activeRequests.delete(requestKey);
+      
       if (approved && this.offering && this.offering.filename === fileName && this.offering.filePath) {
         try {
           // Get file stats
@@ -219,17 +249,18 @@ export class NetworkManager extends EventEmitter {
       socket.end();
     };
 
-    // Validate file exists and matches offering
-    if (!this.offering || this.offering.filename !== fileName) {
-      socket.write(JSON.stringify({ approved: false, reason: "File not available" }));
-      socket.end();
-      return;
-    }
-
     if (this.sharingMode === "auto") {
       await approve(true);
     } else {
+      this.activeRequests.add(requestKey);
       this.emit("fileRequest", { fromIp, fileName, filePath: this.offering.filePath || "", approve });
+      
+      // Auto-cleanup request if not answered within 60 seconds
+      setTimeout(() => {
+        if (this.activeRequests.has(requestKey)) {
+          this.activeRequests.delete(requestKey);
+        }
+      }, 60000);
     }
   }
 

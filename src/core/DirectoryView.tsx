@@ -36,7 +36,14 @@ export abstract class DirectoryView<P = {}, S extends DirectoryState = Directory
         items = entries.filter((item) => item.isDir);
       }
 
-      return [{ label: ".. (Go Back)", value: "..", isDir: true }, ...items];
+      // Sort: Directories first, then alphabetically
+      items.sort((a, b) => {
+        if (a.isDir && !b.isDir) return -1;
+        if (!a.isDir && b.isDir) return 1;
+        return a.label.localeCompare(b.label);
+      });
+
+      return [{ label: `.. (Up one level)`, value: "..", isDir: true }, ...items];
     } catch {
       return [{ label: "Error reading directory", value: "error", isDir: false }];
     }

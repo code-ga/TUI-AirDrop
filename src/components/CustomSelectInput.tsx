@@ -6,12 +6,18 @@ const CustomSelectInput: React.FC<{
   id: string;
   items: any[];
   onSelect: (item: any) => void;
-}> = ({ id, items, onSelect }) => {
+  limit?: number;
+}> = ({ id, items, onSelect, limit = 10 }) => {
   const { focusedId } = useContext(FocusContext);
   const isFocused = focusedId === id;
 
   return (
-    <SelectInput items={items} onSelect={onSelect} isFocused={isFocused} />
+    <SelectInput 
+      items={items} 
+      onSelect={onSelect} 
+      isFocused={isFocused} 
+      limit={limit}
+    />
   );
 };
 

@@ -12,7 +12,7 @@ interface ReceiveViewProps {
   pendingDownloadRequests: FileRequest[];
   currentShare: { from: string; file: string; size: string | number } | null;
   onShareAction: (action: "accept" | "decline", share: any) => void;
-  onDownloadApproval: (request: FileRequest) => void;
+  onDownloadApproval: (request: FileRequest, approved: boolean) => void;
   onBack: () => void;
 }
 
@@ -39,11 +39,18 @@ export class ReceiveView extends BaseView<ReceiveViewProps> {
         },
       ]) as any[])
       .concat(
-        pendingDownloadRequests.map((req, index) => ({
-          key: `req-${req.fromIp}-${index}`,
-          label: `[Approve] ${req.fromIp} wanting ${req.fileName}`,
-          value: { type: "outgoing", action: "approve", request: req },
-        }))
+        pendingDownloadRequests.flatMap((req, index) => [
+          {
+            key: `approve-${req.fromIp}-${index}`,
+            label: `[Approve] ${req.fromIp} wanting ${req.fileName}`,
+            value: { type: "outgoing", action: "approve", request: req },
+          },
+          {
+            key: `deny-${req.fromIp}-${index}`,
+            label: `[Deny] ${req.fromIp} wanting ${req.fileName}`,
+            value: { type: "outgoing", action: "deny", request: req },
+          },
+        ])
       )
       .concat([
         {
@@ -93,7 +100,7 @@ export class ReceiveView extends BaseView<ReceiveViewProps> {
                 } else if (type === "incoming") {
                   onShareAction(action, data);
                 } else if (type === "outgoing") {
-                  onDownloadApproval(request);
+                  onDownloadApproval(request, action === "approve");
                 }
               }}
             />
