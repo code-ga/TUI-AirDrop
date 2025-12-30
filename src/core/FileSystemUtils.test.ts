@@ -1,6 +1,6 @@
 import { describe, expect, test, beforeAll, afterAll } from "bun:test";
 import { scanDirectory } from "./FileSystemUtils";
-import { mkdir, writeFile, rmdir } from "node:fs/promises";
+import { mkdir, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 
@@ -8,7 +8,7 @@ const TEST_DIR = join(process.cwd(), "test_scan_dir");
 
 describe("FileSystemUtils - scanDirectory", () => {
   beforeAll(async () => {
-    if (existsSync(TEST_DIR)) await rmdir(TEST_DIR, { recursive: true });
+    if (existsSync(TEST_DIR)) await rm(TEST_DIR, { recursive: true, force: true });
     await mkdir(TEST_DIR);
 
     // Structure:
@@ -39,7 +39,7 @@ describe("FileSystemUtils - scanDirectory", () => {
   });
 
   afterAll(async () => {
-    if (existsSync(TEST_DIR)) await rmdir(TEST_DIR, { recursive: true });
+    if (existsSync(TEST_DIR)) await rm(TEST_DIR, { recursive: true, force: true });
   });
 
   test("Scenario A: Normal folder should ignore hidden files", async () => {
@@ -70,6 +70,6 @@ describe("FileSystemUtils - scanDirectory", () => {
     const result = await scanDirectory(file);
     
     expect(result).toHaveLength(1);
-    expect(result[0].relativePath).toBe("file1.txt");
+    expect(result[0]?.relativePath).toBe("file1.txt");
   });
 });
