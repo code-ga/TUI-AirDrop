@@ -1,5 +1,9 @@
 # TUI-AirDrop 🚀
 
+> ⚠️ **Important Notice:** Ensure your firewall allows incoming connections from
+> public networks to private networks, as the app requires this for peer
+> discovery and file transfers across different network configurations.
+
 A powerful, secure, and beautiful Terminal User Interface (TUI) file-sharing
 application designed for local networks. Think of it as AirDrop, but for your
 terminal.
