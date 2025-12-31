@@ -61,6 +61,7 @@ export class NetworkManager extends EventEmitter {
   private lastRequestTime = new Map<string, number>();
   private activeRequests = new Set<string>();
   private meshConnections = new Map<string, Socket>();
+  private skipHidden: boolean = true;
 
   public displayName: string = hostname();
   public localIps: string[] = [];
@@ -100,6 +101,14 @@ export class NetworkManager extends EventEmitter {
 
     this.setupUdp();
     this.setupControlServer();
+  }
+
+  public setSkipHidden(value: boolean) {
+    this.skipHidden = value;
+  }
+
+  public setTransferSkipHidden(value: boolean) {
+    this.transferManager.setSkipHidden(value);
   }
 
   private setupUdp() {
@@ -300,7 +309,10 @@ export class NetworkManager extends EventEmitter {
           let fileSize = stats.size;
 
           if (isBatch) {
-            const files = await scanDirectory(this.offering.filePath);
+            const files = await scanDirectory(
+              this.offering.filePath,
+              this.skipHidden
+            );
             fileSize = files.reduce((acc, f) => acc + f.size, 0);
           }
 

@@ -29,6 +29,7 @@ const AppContent = () => {
   const [sharingApprovalMode, setSharingApprovalMode] = useState<
     "auto" | "manual"
   >("manual");
+  const [skipHidden, setSkipHidden] = useState<boolean>(true);
   const [offeredFile, setOfferedFile] = useState<string | null>(null);
   const [peers, setPeers] = useState<Peer[]>([]);
   const [pendingDownloadRequests, setPendingDownloadRequests] = useState<
@@ -125,6 +126,11 @@ const AppContent = () => {
   useEffect(() => {
     networkManager.sharingMode = sharingApprovalMode;
   }, [sharingApprovalMode]);
+
+  useEffect(() => {
+    networkManager.setSkipHidden(skipHidden);
+    networkManager.setTransferSkipHidden(skipHidden);
+  }, [skipHidden]);
 
   useEffect(() => {
     networkManager.offering = offeredFile
@@ -247,6 +253,8 @@ const AppContent = () => {
         <SettingsView
           onModeChange={setSharingApprovalMode}
           currentMode={sharingApprovalMode}
+          onSkipHiddenChange={setSkipHidden}
+          skipHidden={skipHidden}
           onBack={pop}
         />
       );

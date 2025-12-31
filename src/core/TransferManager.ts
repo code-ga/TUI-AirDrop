@@ -41,6 +41,7 @@ export class TransferManager extends EventEmitter {
   private TRANSFER_PORT = 5556;
   private CHUNK_SIZE = 65536; // 64KB
   private activeTransfers = new Map<string, TransferInfo>();
+  private skipHidden: boolean = true;
 
   // Token validation callback
   private tokenValidator?: (token: string, ip: string) => string | null;
@@ -51,7 +52,13 @@ export class TransferManager extends EventEmitter {
     this.setupTransferServer();
   }
 
-  public setTokenValidator(validator: (token: string, ip: string) => string | null) {
+  public setSkipHidden(value: boolean) {
+    this.skipHidden = value;
+  }
+
+  public setTokenValidator(
+    validator: (token: string, ip: string) => string | null
+  ) {
     this.tokenValidator = validator;
   }
 
@@ -67,7 +74,9 @@ export class TransferManager extends EventEmitter {
             if (filePath) {
               this.handleSend(socket, filePath, handshake.startSeq || 0);
             } else {
-              socket.write(Buffer.from(JSON.stringify({ error: "Invalid token" })));
+              socket.write(
+                Buffer.from(JSON.stringify({ error: "Invalid token" }))
+              );
               socket.destroy();
             }
           } else {
@@ -88,11 +97,11 @@ export class TransferManager extends EventEmitter {
   private async handleSend(socket: Socket, filePath: string, startSeq: number) {
     try {
       const stats = await stat(filePath);
-      
+
       if (stats.isDirectory()) {
-         await this.sendBatch(socket, filePath);
+        await this.sendBatch(socket, filePath);
       } else {
-         await this.sendFileStream(socket, filePath, startSeq);
+        await this.sendFileStream(socket, filePath, startSeq);
       }
     } catch (error) {
       socket.destroy();
@@ -102,47 +111,51 @@ export class TransferManager extends EventEmitter {
 
   private async sendBatch(socket: Socket, rootPath: string) {
     try {
-      const files = await scanDirectory(rootPath);
-      
-      for (const file of files) {
-         // 1. Send FILE_START
-         const startHeader: PacketHeader = {
-            type: "FILE_START",
-            seq: 0,
-            size: 0, // No payload in control packet
-            fileSize: file.size,
-            path: file.relativePath
-         };
-         
-         const startPacket = this.serializePacket(startHeader, Buffer.alloc(0));
-         if (!socket.write(startPacket)) {
-            await new Promise((resolve) => socket.once("drain", resolve));
-         }
+      const files = await scanDirectory(rootPath, this.skipHidden);
 
-         // 2. Send File Data
-         await this.sendFileStream(socket, file.absolutePath, 0, false);
+      for (const file of files) {
+        // 1. Send FILE_START
+        const startHeader: PacketHeader = {
+          type: "FILE_START",
+          seq: 0,
+          size: 0, // No payload in control packet
+          fileSize: file.size,
+          path: file.relativePath,
+        };
+
+        const startPacket = this.serializePacket(startHeader, Buffer.alloc(0));
+        if (!socket.write(startPacket)) {
+          await new Promise((resolve) => socket.once("drain", resolve));
+        }
+
+        // 2. Send File Data
+        await this.sendFileStream(socket, file.absolutePath, 0, false);
       }
 
       // 3. Send BATCH_END
       const endHeader: PacketHeader = {
-         type: "BATCH_END",
-         seq: 0,
-         size: 0
+        type: "BATCH_END",
+        seq: 0,
+        size: 0,
       };
       const endPacket = this.serializePacket(endHeader, Buffer.alloc(0));
       socket.write(endPacket);
-      
-      socket.end();
 
+      socket.end();
     } catch (error) {
-       console.error("Batch send error", error);
-       socket.destroy();
+      console.error("Batch send error", error);
+      socket.destroy();
     }
   }
 
-  private async sendFileStream(socket: Socket, filePath: string, startSeq: number, closeSocketAtEnd: boolean = true) {
+  private async sendFileStream(
+    socket: Socket,
+    filePath: string,
+    startSeq: number,
+    closeSocketAtEnd: boolean = true
+  ) {
     let fileHandle: FileHandle | null = null;
-    
+
     try {
       const stats = await stat(filePath);
       const fileSize = stats.size;
@@ -187,7 +200,7 @@ export class TransferManager extends EventEmitter {
 
       await fileHandle.close();
       if (closeSocketAtEnd) {
-         socket.end();
+        socket.end();
       }
     } catch (error) {
       if (fileHandle) await fileHandle.close();
@@ -207,22 +220,21 @@ export class TransferManager extends EventEmitter {
     totalSize: number, // total batch size or file size
     isBatch: boolean = false
   ): Promise<void> {
-    
     // Prepare root directory if batch
     if (isBatch) {
       if (!existsSync(savePath)) {
         await mkdir(savePath, { recursive: true });
       }
     } else {
-        const dir = dirname(savePath);
-        if (!existsSync(dir)) {
-          await mkdir(dir, { recursive: true });
-        }
+      const dir = dirname(savePath);
+      if (!existsSync(dir)) {
+        await mkdir(dir, { recursive: true });
+      }
     }
 
     return new Promise((resolve, reject) => {
       const socket = new Socket();
-      
+
       // State for batch
       let currentFilePath = isBatch ? "" : savePath;
       let currentFileHandle: FileHandle | null = null;
@@ -233,7 +245,7 @@ export class TransferManager extends EventEmitter {
 
       // Track progress
       let batchCurrentBytes = 0;
-      
+
       const transferInfo: TransferInfo = {
         filename,
         size: totalSize,
@@ -243,7 +255,7 @@ export class TransferManager extends EventEmitter {
         savePath,
         isBatch,
         totalFiles: 0, // Should be passed ideally, but we might not know
-        currentFileIndex: 0
+        currentFileIndex: 0,
       };
 
       this.activeTransfers.set(filename, transferInfo);
@@ -260,16 +272,15 @@ export class TransferManager extends EventEmitter {
       socket.connect(this.TRANSFER_PORT, host, async () => {
         try {
           socket.write(Buffer.from(JSON.stringify({ token, startSeq: 0 })));
-          
+
           if (!isBatch) {
-             // Prepare single file receiving immediately
-             partPath = `${savePath}.part`;
-             currentFileHandle = await open(partPath, "w");
+            // Prepare single file receiving immediately
+            partPath = `${savePath}.part`;
+            currentFileHandle = await open(partPath, "w");
           }
-          
         } catch (error) {
-           reject(error);
-           await cleanup();
+          reject(error);
+          await cleanup();
         }
       });
 
@@ -283,113 +294,117 @@ export class TransferManager extends EventEmitter {
             if (buffer.length < 4 + headerLength) break;
 
             const headerJson = buffer.subarray(4, 4 + headerLength).toString();
-            
+
             let header: PacketHeader;
             try {
-                header = JSON.parse(headerJson);
+              header = JSON.parse(headerJson);
             } catch (e) {
-                 throw new Error("Invalid packet header");
+              throw new Error("Invalid packet header");
             }
 
             // Packet Body Check
-            if (buffer.length < 4 + headerLength + header.size) break; 
+            if (buffer.length < 4 + headerLength + header.size) break;
 
             // Extract binary data (only existing if header.size > 0)
-            const binaryData = header.size > 0 
-                ? buffer.subarray(4 + headerLength, 4 + headerLength + header.size)
+            const binaryData =
+              header.size > 0
+                ? buffer.subarray(
+                    4 + headerLength,
+                    4 + headerLength + header.size
+                  )
                 : Buffer.alloc(0);
 
             // Handle Packet Type
             if (header.type === "FILE_START") {
-                 // Close previous if any (safeguard)
-                 if (currentFileHandle) await currentFileHandle.close();
-                 
-                 if (!header.path) throw new Error("FILE_START missing path");
-                 
-                 isActuallyBatch = true;
+              // Close previous if any (safeguard)
+              if (currentFileHandle) await currentFileHandle.close();
 
-                 // Create dir for file
-                 const fullPath = join(savePath, header.path);
-                 const fileDir = dirname(fullPath);
-                 if (!existsSync(fileDir)) {
-                     await mkdir(fileDir, { recursive: true });
-                 }
-                 
-                 currentFilePath = fullPath;
-                 partPath = `${fullPath}.part`;
-                 currentFileHandle = await open(partPath, "w");
-                 
-                 // Update Info
-                 transferInfo.currentFileIndex = (transferInfo.currentFileIndex || 0) + 1;
-                 
-                 // We don't have binary data here.
-                 
+              if (!header.path) throw new Error("FILE_START missing path");
+
+              isActuallyBatch = true;
+
+              // Create dir for file
+              const fullPath = join(savePath, header.path);
+              const fileDir = dirname(fullPath);
+              if (!existsSync(fileDir)) {
+                await mkdir(fileDir, { recursive: true });
+              }
+
+              currentFilePath = fullPath;
+              partPath = `${fullPath}.part`;
+              currentFileHandle = await open(partPath, "w");
+
+              // Update Info
+              transferInfo.currentFileIndex =
+                (transferInfo.currentFileIndex || 0) + 1;
+
+              // We don't have binary data here.
             } else if (header.type === "BATCH_END") {
-                 if (currentFileHandle) await currentFileHandle.close();
-                 currentFileHandle = null;
-                 
-                 transferInfo.status = "complete";
-                 transferInfo.progress = totalSize; 
-                 this.emit("transferComplete", { filename, savePath });
-                 this.activeTransfers.delete(filename);
-                 socket.destroy();
-                 resolve();
-                 return;
-                 
-            } else if (header.type === "DATA" || !header.type) { // Default to DATA for backward compat if undefined?
-                 // Verify hash
-                 if (binaryData.length > 0) {
-                     const calculatedHash = createHash("sha256")
-                       .update(binaryData)
-                       .digest("hex");
-    
-                     if (header.hash && calculatedHash !== header.hash) {
-                       throw new Error("Data corruption");
-                     }
-                     
-                     // Write
-                     if (currentFileHandle) {
-                         await currentFileHandle.write(binaryData);
-                         batchCurrentBytes += header.size;
-                         transferInfo.progress = batchCurrentBytes; // Updates global progress
-                         // Note: totalSize passed to receiveFile should ideally be the Batch Size.
-                     }
-                 }
-                 
-                 if (header.isLast) {
-                     // End of current file
-                     if (currentFileHandle) await currentFileHandle.close();
-                     currentFileHandle = null;
-                     
-                     // Rename current file
-                     if (partPath && currentFilePath) {
-                        await rename(partPath, currentFilePath);
-                     }
+              if (currentFileHandle) await currentFileHandle.close();
+              currentFileHandle = null;
 
-                     if (!isActuallyBatch) {
-                        // Single file mode
-                        transferInfo.status = "complete";
-                        transferInfo.progress = totalSize;
-                        this.activeTransfers.delete(filename);
-                        this.emit("transferComplete", { filename, savePath });
-                        socket.destroy();
-                        resolve();
-                        return;
-                     }
-                 }
+              transferInfo.status = "complete";
+              transferInfo.progress = totalSize;
+              this.emit("transferComplete", { filename, savePath });
+              this.activeTransfers.delete(filename);
+              socket.destroy();
+              resolve();
+              return;
+            } else if (header.type === "DATA" || !header.type) {
+              // Default to DATA for backward compat if undefined?
+              // Verify hash
+              if (binaryData.length > 0) {
+                const calculatedHash = createHash("sha256")
+                  .update(binaryData)
+                  .digest("hex");
+
+                if (header.hash && calculatedHash !== header.hash) {
+                  throw new Error("Data corruption");
+                }
+
+                // Write
+                if (currentFileHandle) {
+                  await currentFileHandle.write(binaryData);
+                  batchCurrentBytes += header.size;
+                  transferInfo.progress = batchCurrentBytes; // Updates global progress
+                  // Note: totalSize passed to receiveFile should ideally be the Batch Size.
+                }
+              }
+
+              if (header.isLast) {
+                // End of current file
+                if (currentFileHandle) await currentFileHandle.close();
+                currentFileHandle = null;
+
+                // Rename current file
+                if (partPath && currentFilePath) {
+                  await rename(partPath, currentFilePath);
+                }
+
+                if (!isActuallyBatch) {
+                  // Single file mode
+                  transferInfo.status = "complete";
+                  transferInfo.progress = totalSize;
+                  this.activeTransfers.delete(filename);
+                  this.emit("transferComplete", { filename, savePath });
+                  socket.destroy();
+                  resolve();
+                  return;
+                }
+              }
             }
 
             // Move Buffer
             buffer = buffer.subarray(4 + headerLength + header.size);
-            
+
             // Emit progress occasionally
             const now = Date.now();
             if (now - lastProgressUpdate > 500) {
-                const elapsed = (now - lastProgressUpdate) / 1000;
-                transferInfo.speed = (batchCurrentBytes - lastBytes) / elapsed;
-                this.emit("transferProgress", { ...transferInfo });
-                lastProgressUpdate = now;
-                lastBytes = batchCurrentBytes;
+              const elapsed = (now - lastProgressUpdate) / 1000;
+              transferInfo.speed = (batchCurrentBytes - lastBytes) / elapsed;
+              this.emit("transferProgress", { ...transferInfo });
+              lastProgressUpdate = now;
+              lastBytes = batchCurrentBytes;
             }
           }
         } catch (error) {
