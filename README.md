@@ -8,7 +8,7 @@ A powerful, secure, and beautiful Terminal User Interface (TUI) file-sharing
 application designed for local networks. Think of it as AirDrop, but for your
 terminal.
 
-![Version](https://img.shields.io/badge/version-0.3.0-blue)
+![GitHub Release](https://img.shields.io/github/v/release/code-ga/TUI-AirDrop)
 ![License](https://img.shields.io/badge/license-MIT-green)
 [![Build and Release](https://github.com/code-ga/TUI-AirDrop/actions/workflows/release.yml/badge.svg)](https://github.com/code-ga/TUI-AirDrop/actions/workflows/release.yml)
 
